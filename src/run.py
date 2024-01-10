@@ -1,6 +1,3 @@
-# TODO: Try softmax with a higher (lower?) temp to allow for more entropy in probs, or try L2 loss on the label vector.
-# TODO: Find a good way to compute distances between models based on OT? Get ideas from the paper
-
 from synthdatasets import *
 from train import *
 from utils import *
