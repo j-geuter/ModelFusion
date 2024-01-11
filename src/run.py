@@ -106,7 +106,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Aligned:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i], SimpleNN)
+    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i])
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -114,7 +114,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Aligned and regularized:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i], SimpleNN, reg=0.1)
+    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i], reg=0.1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -132,7 +132,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n\n')
 print('Aligned:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[3]['models'][i], SimpleNN, delta=2/3)
+    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[3]['models'][i], delta=2/3)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -140,7 +140,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Aligned and regularized:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[3]['models'][i], SimpleNN, delta=2/3, reg=0.1)
+    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[3]['models'][i], delta=2/3, reg=0.1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')

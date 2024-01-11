@@ -33,6 +33,7 @@ class SimpleNN(nn.Module):
         )
 
         self.par_number = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        self.bias = bias
 
         if weights is not None:
             self.update_weights(weights)

@@ -30,7 +30,6 @@ def compute_plan(A, B, reg = None):
 def fuse_multiple_models(
         models_A,
         models_B,
-        nnClass,
         reg = None,
         delta = 0.5
 ):
@@ -43,7 +42,6 @@ def fuse_multiple_models(
         fuse_models(
             model_A,
             model_B,
-            nnClass,
             reg,
             delta
         )
@@ -55,14 +53,13 @@ def aligned_distance(model_A, model_B):
     """
     Aligns `model_A` w.r.t. to `model_B`, then returns the distance between the aligned models.
     """
-    aligned_A = fuse_models(model_A, model_B, type(model_A), delta=1)
+    aligned_A = fuse_models(model_A, model_B, delta=1)
     distance = torch.norm(aligned_A.get_weight_tensor() - model_B.get_weight_tensor())
     return distance
 
 def fuse_models(
         model_A,
         model_B,
-        nnClass,
         reg = None,
         delta = 0.5
 ):
@@ -70,43 +67,55 @@ def fuse_models(
     Fuse two models together.
     :param model_A: fully connected `nn.Module` neural network with the same number of layers as `model_B`.
     :param model_B: fully connected `nn.Module` neural network with the same number of layers as `model_A`. Hidden layer sizes may differ from those of `model_A`.
-    :param nnClass: neural network class whose instances `model_A` and `model_B` are. Must accept a list of layer dimensions as first argument, and an optional
-        one-dimensional vector containing network weights as second argument.
     :param reg: if passed, the entropic OT problem is solved instead the regular one for each layer, with regularizer `reg`.
-    :param delta: controls what convex combination to return. Returns `delta`*`model_A`+(1-`delta`)*`model_B` (note, if `delta`=1, this returns a permuted version of `model_A`.
+    :param delta: controls what convex combination to return. Returns `delta`*`model_A`+(1-`delta`)*`model_B` (note, if `delta`=1, this returns a permuted version of `model_A`).
     :return: fused model. Of same size as `model_B`.
     """
     sizes_A = [param.shape for param in model_A.parameters()]
     params_A = list(model_A.parameters())
     sizes_B = [param.shape for param in model_B.parameters()]
     params_B = list(model_B.parameters())
-    num_layers = len(sizes_A) // 2 #number of hidden+output layers; not counting input layer
-
+    bias = model_A.bias
+    num_layers = len(sizes_A) // 2 if bias else len(sizes_A) # Number of hidden+output layers; not counting input layer
+    nnClass = type(model_A)
     # test that the models are of compatible shape and type
-    assert isinstance(model_A, nnClass), "model A is of the wrong class"
+    assert model_B.bias == bias, "one model has bias layers, the other does not"
     assert isinstance(model_B, nnClass), "model B is of the wrong class"
     assert len(sizes_A) == len(sizes_B), "models do not have the same number of layers"
     assert sizes_A[0][1] == sizes_B[0][1], "models do not have the same input dimension"
-    assert sizes_A[-1][-1] == sizes_B[-1][-1], "models do not have the same output dimension"
+    assert sizes_A[-1][0] == sizes_B[-1][0], "models do not have the same output dimension"
     for i in range(num_layers):
-        assert len(sizes_A[2*i]) == len(sizes_B[2*i]) == 2, "expected linear layer, but found wrong parameter shape"
-        assert len(sizes_A[2*i + 1]) == len(sizes_B[2*i + 1]) == 1, "expected bias layer, but found wrong parameter shape"
-        assert sizes_A[2*i][0] == sizes_A[2*i + 1][0], "bias layer of model A does not match size of linear layer"
-        assert sizes_B[2*i][0] == sizes_B[2*i + 1][0], "bias layer of model B does not match size of linear layer"
-
-    layer_sizes_A = [sizes_A[0][1]]+[sizes_A[2*i+1][0] for i in range(num_layers)] #sizes of all layers including input and output layers; e.g. [5, 10, 2]
-    layer_sizes_B = [sizes_B[0][1]] + [sizes_B[2 * i + 1][0] for i in range(num_layers)]
+        if bias:
+            assert len(sizes_A[2*i]) == len(sizes_B[2*i]) == 2, "expected linear layer, but found wrong parameter shape"
+            assert len(sizes_A[2*i + 1]) == len(sizes_B[2*i + 1]) == 1, "expected bias layer, but found wrong parameter shape"
+            assert sizes_A[2*i][0] == sizes_A[2*i + 1][0], "bias layer of model A does not match size of linear layer"
+            assert sizes_B[2*i][0] == sizes_B[2*i + 1][0], "bias layer of model B does not match size of linear layer"
+        else:
+            assert len(sizes_A[i]) == len(sizes_B[i]) == 2, "expected linear layer, but found wrong parameter shape"
+    if bias:
+        layer_sizes_A = [sizes_A[0][1]]+[sizes_A[2*i+1][0] for i in range(num_layers)] # Sizes of all layers including input and output layers; e.g. [5, 10, 2]
+        layer_sizes_B = [sizes_B[0][1]] + [sizes_B[2 * i + 1][0] for i in range(num_layers)]
+    else:
+        layer_sizes_A = [sizes_A[0][1]]+[sizes_A[i][0] for i in range(num_layers)]
+        layer_sizes_B = [sizes_B[0][1]]+[sizes_B[i][0] for i in range(num_layers)]
     input_dim = layer_sizes_A[0]
     fused_params = []
     T = np.eye(input_dim) / input_dim
     for l in range(num_layers):
-        w_hat = np.matmul(params_A[2 * l].detach().numpy(), T) * T.shape[1]
-        w_hat = np.concatenate((w_hat, params_A[2 * l + 1].detach().numpy()[None, :].T), axis=1) # add bias layer
-        weights_B = np.concatenate((params_B[2 * l].detach().numpy(), params_B[2 * l + 1].detach().numpy()[None, :].T), axis=1)
+        if bias:
+            w_hat = np.matmul(params_A[2 * l].detach().numpy(), T) * T.shape[1]
+            w_hat = np.concatenate((w_hat, params_A[2 * l + 1].detach().numpy()[None, :].T), axis=1)  # add bias layer
+            weights_B = np.concatenate((params_B[2 * l].detach().numpy(), params_B[2 * l + 1].detach().numpy()[None, :].T), axis=1)
+        else:
+            w_hat = np.matmul(params_A[l].detach().numpy(), T) * T.shape[1]
+            weights_B = params_B[l].detach().numpy()
         T = compute_plan(w_hat, weights_B, reg)
         w_tilde = T.shape[1] * np.matmul(T.T, w_hat)
         fused_weights = delta * w_tilde + (1 - delta) * weights_B
-        fused_layer = fused_weights[:, :-1]
-        fused_bias = fused_weights[:, -1:].flatten()
-        fused_params += [torch.tensor(fused_layer).flatten(), torch.tensor(fused_bias).flatten()]
-    return nnClass(layer_sizes_B, torch.tensor(np.concatenate(fused_params)).detach().to(params_B[0].dtype))
+        if bias:
+            fused_layer = fused_weights[:, :-1]
+            fused_bias = fused_weights[:, -1:]
+            fused_params += [torch.tensor(fused_layer).flatten(), torch.tensor(fused_bias).flatten()]
+        else:
+            fused_params += [torch.tensor(fused_weights).flatten()]
+    return nnClass(layer_sizes_B, torch.cat(fused_params).detach().to(params_B[0].dtype), bias=bias)
