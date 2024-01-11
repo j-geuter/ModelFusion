@@ -12,13 +12,13 @@ class TemperatureScaledSoftmax(nn.Module):
         return F.softmax(scaled_logits, dim=-1)
 
 class SimpleNN(nn.Module):
-    def __init__(self, layer_sizes, weights = None, temperature = 1):
+    def __init__(self, layer_sizes, weights = None, temperature = 1, bias = True):
         super(SimpleNN, self).__init__()
 
         self.layers = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(layer_sizes[l], layer_sizes[l + 1]),
+                    nn.Linear(layer_sizes[l], layer_sizes[l + 1], bias=bias),
                     nn.ReLU(),
                 )
                 for l in range(len(layer_sizes) - 2)
@@ -26,7 +26,7 @@ class SimpleNN(nn.Module):
             +
             [
                 nn.Sequential(
-                nn.Linear(layer_sizes[-2], layer_sizes[-1]),
+                nn.Linear(layer_sizes[-2], layer_sizes[-1], bias=bias),
                 TemperatureScaledSoftmax(temperature)
                 )
             ]

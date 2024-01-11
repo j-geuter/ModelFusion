@@ -8,15 +8,17 @@ gmms = InterpolGMMs(
     gmm_kwargs2={'l':3,'N':1000,'mus':torch.tensor([[1.,4.],[0.,0.],[0.,-3.]])}
 )
 
-hidden_size = 100
+HIDDEN_SIZE = 100
+NUM_HIDDEN_LAYERS = 0
+BIAS = False
+NUM_DATASETS = len(gmms.datasets)
 
-num_datasets = len(gmms.datasets)
 # for each dataset, contains a list with 2-tuples of (model,weight)
-models_and_weights = {j: {'models': [], 'weights': []} for j in range(num_datasets)}
+models_and_weights = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
 for i in range(5):
-    models = [SimpleNN([2, hidden_size, hidden_size, 5], temperature=1) for _ in range(num_datasets)]
-    for j in range(num_datasets):
+    models = [SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
+    for j in range(NUM_DATASETS):
         train(models[j], gmms.datasets[j], num_epochs=100, batch_size=50)
         weights = models[j].get_weight_tensor()
         models_and_weights[j]['models'].append(models[j])
@@ -32,8 +34,8 @@ pairwise_distances = torch.tensor(
     [
         [torch.cdist(models_and_weights[i]['weights'], models_and_weights[j]['weights']).mean() if i!=j else
          torch.cdist(models_and_weights[i]['weights'], models_and_weights[j]['weights'])[~torch.eye(len(models_and_weights[j]['weights']), dtype=bool)].mean()
-         for i in range(num_datasets)]
-        for j in range(num_datasets)
+         for i in range(NUM_DATASETS)]
+        for j in range(NUM_DATASETS)
     ]
 )
 print(pairwise_distances)
@@ -64,8 +66,8 @@ def compute_average_aligned_distance(models_A, models_B, skip_diag = False):
 pairwise_aligned_distances = torch.tensor(
     [
         [compute_average_aligned_distance(models_and_weights[i]['models'], models_and_weights[j]['models'], i==j)
-         for i in range(num_datasets)]
-        for j in range(num_datasets)
+         for i in range(NUM_DATASETS)]
+        for j in range(NUM_DATASETS)
     ]
 )
 print(pairwise_aligned_distances)
@@ -73,7 +75,7 @@ print('----------------------------------------------------------------\n')
 print('----------------------------------------------------------------\n\n')
 print('Pairwise distances between avg. models for each dataset\n')
 print('----------------------------------------------------------------\n')
-mean_weights = torch.cat([models_and_weights[j]['weights'].mean(dim=0)[None, :] for j in range(num_datasets)])
+mean_weights = torch.cat([models_and_weights[j]['weights'].mean(dim=0)[None, :] for j in range(NUM_DATASETS)])
 pairwise_distances = torch.cdist(mean_weights, mean_weights)
 print(pairwise_distances) # Print pairwise distance matrix
 
@@ -87,7 +89,7 @@ print('----------------------------------------------------------------\n')
 print('Accuracy for random weight initialization on dataset 2')
 accs = []
 for i in range(5):
-    model = SimpleNN([2, hidden_size, hidden_size, 5])
+    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5])
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -96,7 +98,7 @@ print('Accuracy for average of model 1 and model 3 on dataset 2')
 accs = []
 for i in range(5):
     weights = ((models_and_weights[0]['weights'][i]+models_and_weights[2]['weights'][i])/2).detach().clone()
-    model = SimpleNN([2, hidden_size, hidden_size, 5], weights)
+    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5], weights)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -122,7 +124,7 @@ print('Accuracies for average of model 1 and model 4 on dataset 2')
 accs = []
 for i in range(5):
     weights = ((2*models_and_weights[0]['weights'][i]+models_and_weights[3]['weights'][i])/3).detach().clone()
-    model = SimpleNN([2, hidden_size, hidden_size, 5], weights)
+    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5], weights)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n\n')
