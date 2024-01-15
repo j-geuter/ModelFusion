@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from copy import copy
 
 class TemperatureScaledSoftmax(nn.Module):
     def __init__(self, temperature):
@@ -15,6 +16,7 @@ class SimpleNN(nn.Module):
     def __init__(self, layer_sizes, weights = None, temperature = 1, bias = True):
         super(SimpleNN, self).__init__()
 
+        self.layer_sizes = copy(layer_sizes)
         self.layers = nn.ModuleList(
             [
                 nn.Sequential(
@@ -50,6 +52,8 @@ class SimpleNN(nn.Module):
         return detached_weights
 
     def update_weights(self, vector):
+        if not vector.dim() == 1:
+            vector = vector.flatten()
         assert len(vector) == self.par_number, "Weight vector size does not match parameter count!"
         vector_index = 0
         for param in self.parameters():

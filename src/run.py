@@ -89,7 +89,7 @@ print('----------------------------------------------------------------\n')
 print('Accuracy for random weight initialization on dataset 2')
 accs = []
 for i in range(5):
-    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5])
+    model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -98,7 +98,7 @@ print('Accuracy for average of model 1 and model 3 on dataset 2')
 accs = []
 for i in range(5):
     weights = ((models_and_weights[0]['weights'][i]+models_and_weights[2]['weights'][i])/2).detach().clone()
-    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5], weights)
+    model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], weights, bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -124,7 +124,7 @@ print('Accuracies for average of model 1 and model 4 on dataset 2')
 accs = []
 for i in range(5):
     weights = ((2*models_and_weights[0]['weights'][i]+models_and_weights[3]['weights'][i])/3).detach().clone()
-    model = SimpleNN([2, HIDDEN_SIZE, HIDDEN_SIZE, 5], weights)
+    model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], weights, bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n\n')
