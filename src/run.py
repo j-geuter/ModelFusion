@@ -3,13 +3,21 @@ from train import *
 from utils import *
 from fusion import *
 
+#gmms = InterpolGMMs(
+#    gmm_kwargs1={'N':1000, 'mus':torch.tensor([[-3.,-3.],[-3.,3.]]),'lambdas':torch.tensor([2.,10.])},
+#    gmm_kwargs2={'l':3,'N':1000,'mus':torch.tensor([[1.,4.],[0.,0.],[0.,-3.]])}
+#)
+
+torch.manual_seed(1)
+
 gmms = InterpolGMMs(
-    gmm_kwargs1={'N':1000, 'mus':torch.tensor([[-3.,-3.],[-3.,3.]]),'lambdas':torch.tensor([2.,10.])},
-    gmm_kwargs2={'l':3,'N':1000,'mus':torch.tensor([[1.,4.],[0.,0.],[0.,-3.]])}
+    nb_interpol=3,
+    gmm_kwargs1={'l':3, 'N':1000, 'mus':5*torch.tensor([[0., 0.],[5., 1.], [3., 4.]]),'lambdas':torch.tensor([2.,10., 20.])},
+    gmm_kwargs2={'l':4,'N':1000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])}
 )
 
-HIDDEN_SIZE = 100
-NUM_HIDDEN_LAYERS = 0
+HIDDEN_SIZE = 64
+NUM_HIDDEN_LAYERS = 1
 BIAS = False
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
@@ -27,7 +35,7 @@ for i in range(5):
             num_epochs=100,
             loss_fn=nn.MSELoss(),
             opt=optim.Adam,
-            lr=0.1
+            lr=0.001
         )
         weights = models[j].get_weight_tensor()
         data[j]['models'].append(models[j])
@@ -107,7 +115,7 @@ print('Accuracy for average of model 1 and model 3 on dataset 2')
 accs = []
 for i in range(5):
     weights = ((data[0]['weights'][i] + data[2]['weights'][i]) / 2).detach().clone()
-    model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], weights, bias=BIAS)
+    model = SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], weights, bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
