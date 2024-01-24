@@ -14,7 +14,7 @@ BIAS = False
 NUM_DATASETS = len(gmms.datasets)
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
-models_and_weights = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
+data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
 for i in range(5):
     models = [SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
@@ -28,19 +28,19 @@ for i in range(5):
             lr=0.1
         )
         weights = models[j].get_weight_tensor()
-        models_and_weights[j]['models'].append(models[j])
-        models_and_weights[j]['weights'].append(weights[None, :])
-for key, val in models_and_weights.items():
+        data[j]['models'].append(models[j])
+        data[j]['weights'].append(weights[None, :])
+for key, val in data.items():
     val['weights'] = torch.cat(val['weights'])
 print('----------------------------------------------------------------\n')
-print(f'Parameter count: {models_and_weights[0]["models"][0].par_number}')
+print(f'Parameter count: {data[0]["models"][0].par_number}')
 print('----------------------------------------------------------------\n')
 print('----------------------------------------------------------------\n\n')
 print('Average of pairwise distances between models across datasets\n')
 pairwise_distances = torch.tensor(
     [
-        [torch.cdist(models_and_weights[i]['weights'], models_and_weights[j]['weights']).mean() if i!=j else
-         torch.cdist(models_and_weights[i]['weights'], models_and_weights[j]['weights'])[~torch.eye(len(models_and_weights[j]['weights']), dtype=bool)].mean()
+        [torch.cdist(data[i]['weights'], data[j]['weights']).mean() if i != j else
+         torch.cdist(data[i]['weights'], data[j]['weights'])[~torch.eye(len(data[j]['weights']), dtype=bool)].mean()
          for i in range(NUM_DATASETS)]
         for j in range(NUM_DATASETS)
     ]
@@ -72,7 +72,7 @@ def compute_average_aligned_distance(models_A, models_B, skip_diag = False):
 
 pairwise_aligned_distances = torch.tensor(
     [
-        [compute_average_aligned_distance(models_and_weights[i]['models'], models_and_weights[j]['models'], i==j)
+        [compute_average_aligned_distance(data[i]['models'], data[j]['models'], i == j)
          for i in range(NUM_DATASETS)]
         for j in range(NUM_DATASETS)
     ]
@@ -82,14 +82,14 @@ print('----------------------------------------------------------------\n')
 print('----------------------------------------------------------------\n\n')
 print('Pairwise distances between avg. models for each dataset\n')
 print('----------------------------------------------------------------\n')
-mean_weights = torch.cat([models_and_weights[j]['weights'].mean(dim=0)[None, :] for j in range(NUM_DATASETS)])
+mean_weights = torch.cat([data[j]['weights'].mean(dim=0)[None, :] for j in range(NUM_DATASETS)])
 pairwise_distances = torch.cdist(mean_weights, mean_weights)
 print(pairwise_distances) # Print pairwise distance matrix
 
 print('----------------------------------------------------------------\n')
 print('----------------------------------------------------------------\n\n')
 print('Accuracy for models on dataset 2')
-accs = [get_accuracy(model, gmms.datasets[1]) for model in models_and_weights[1]['models']]
+accs = [get_accuracy(model, gmms.datasets[1]) for model in data[1]['models']]
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('----------------------------------------------------------------\n')
@@ -104,7 +104,7 @@ print('----------------------------------------------------------------\n')
 print('Accuracy for average of model 1 and model 3 on dataset 2')
 accs = []
 for i in range(5):
-    weights = ((models_and_weights[0]['weights'][i]+models_and_weights[2]['weights'][i])/2).detach().clone()
+    weights = ((data[0]['weights'][i] + data[2]['weights'][i]) / 2).detach().clone()
     model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], weights, bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -113,7 +113,37 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Aligned:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i])
+    fused_model = fuse_models(data[0]['models'][i], data[2]['models'][i])
+    accs.append(get_accuracy(fused_model, gmms.datasets[1]))
+avg = sum(accs) / len(accs)
+print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
+
+print('Model 1 on dataset 2:')
+accs = []
+for i in range(5):
+    accs.append(get_accuracy(data[0]['models'][i], gmms.datasets[1]))
+avg = sum(accs) / len(accs)
+print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
+
+print('Model 3 on dataset 2:')
+accs = []
+for i in range(5):
+    accs.append(get_accuracy(data[2]['models'][i], gmms.datasets[1]))
+avg = sum(accs) / len(accs)
+print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
+
+print('Model 1 aligned to 2:')
+accs = []
+for i in range(5):
+    fused_model = fuse_models(data[0]['models'][i], data[1]['models'][i], delta=1)
+    accs.append(get_accuracy(fused_model, gmms.datasets[1]))
+avg = sum(accs) / len(accs)
+print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
+
+print('Model 3 aligned to 2:')
+accs = []
+for i in range(5):
+    fused_model = fuse_models(data[2]['models'][i], data[1]['models'][i], delta=1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -121,11 +151,12 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Aligned and regularized:')
 accs = []
 for i in range(5):
-    fused_model = fuse_models(models_and_weights[0]['models'][i], models_and_weights[2]['models'][i], reg=0.1)
+    fused_model = fuse_models(data[0]['models'][i], data[2]['models'][i], reg=0.1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
+"""
 print('----------------------------------------------------------------\n')
 print('Accuracies for average of model 1 and model 4 on dataset 2')
 accs = []
@@ -151,5 +182,5 @@ for i in range(5):
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
-
+"""
 
