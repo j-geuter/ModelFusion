@@ -6,8 +6,11 @@ from models import *
 def train(
         model,
         dataset,
-        num_epochs = 1,
-        batch_size = 50
+        num_epochs = 20,
+        batch_size = 128,
+        loss_fn = nn.CrossEntropyLoss(),
+        lr = 0.1,
+        opt = optim.SGD,
 ):
     """
     Train a `model` on a `dataset`.
@@ -16,11 +19,11 @@ def train(
         and the second is `(N,l)` shaped and corresponds to labels.
     :param num_epochs: number of epochs.
     :param batch_size: batch size.
+    :param loss_fn: loss function.
     :return: train error.
     """
     model.train()
-    loss_fn = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = opt(model.parameters(), lr=lr)
     batches = batch_generator(dataset, num_epochs, batch_size)
 
     for (i, (batch_x, batch_y)) in enumerate(batches):
@@ -79,7 +82,7 @@ def get_accuracy(model, dataset):
 
 def batch_generator(dataset, num_epochs, batch_size):
 
-    x_samples, labels = dataset
+    x_samples, labels = dataset[0], dataset[1]
     num_samples = len(x_samples)
 
     for epoch in range(num_epochs):
