@@ -19,7 +19,14 @@ models_and_weights = {j: {'models': [], 'weights': []} for j in range(NUM_DATASE
 for i in range(5):
     models = [SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
     for j in range(NUM_DATASETS):
-        train(models[j], gmms.datasets[j], num_epochs=100, batch_size=50)
+        train(
+            models[j],
+            gmms.datasets[j],
+            num_epochs=100,
+            loss_fn=nn.MSELoss(),
+            opt=optim.Adam,
+            lr=0.1
+        )
         weights = models[j].get_weight_tensor()
         models_and_weights[j]['models'].append(models[j])
         models_and_weights[j]['weights'].append(weights[None, :])
