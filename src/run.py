@@ -12,12 +12,14 @@ HIDDEN_SIZE = 100
 NUM_HIDDEN_LAYERS = 0
 BIAS = False
 NUM_DATASETS = len(gmms.datasets)
+D_IN = 2
+D_OUT = gmms.datasets[0][1].size(1)
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
 for i in range(5):
-    models = [SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
+    models = [SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
     for j in range(NUM_DATASETS):
         train(
             models[j],
@@ -96,7 +98,7 @@ print('----------------------------------------------------------------\n')
 print('Accuracy for random weight initialization on dataset 2')
 accs = []
 for i in range(5):
-    model = SimpleNN([2] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [5], bias=BIAS)
+    model = SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
