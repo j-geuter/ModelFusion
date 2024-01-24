@@ -1,30 +1,25 @@
 import ot
-import numpy as np
 import torch
 
-def compute_plan(A, B, reg = None):
+def compute_plan(A, B, reg = None, metric = 'euclidean'):
     """
     Compute a transport plan between two uniform histograms, where the cost function is computed from the input matrices A and B.
     This corresponds to a transport plan between the layers of two neural networks, where A and B correspond to the weight matrices.
     :param A: weight matrix for first neural network, (n,d)-dimensional matrix.
     :param B: weight matrix for second neural network, (m,d)-dimensional matrix.
     :param reg: if passed, the entropic OT problem is solved instead, with regularizer `reg`.
+    :param metric: metric for cost function, passed to `ot.dist`. Can be 'euclidean' or 'sqeuclidean'.
     :return: transport plan, (n,m)-dimensional matrix.
     """
     n, m = A.shape[0], B.shape[0]
-    C = np.zeros((n, m))
-
-    # Calculate Euclidean distance for each pair of rows
-    for i in range(n):
-        for j in range(m):
-            C[i, j] = np.linalg.norm(A[i] - B[j])
-
-    mu = np.ones(n) / n
-    nu = np.ones(m) / m
+    C = ot.dist(A, B, metric=metric)
+    C /= C.max()
+    mu = torch.ones(n) / n
+    nu = torch.ones(m) / m
     if reg is None:
         T = ot.emd(mu, nu, C)
     else:
-        T = ot.sinkhorn(mu, nu, C, reg)
+        T = ot.sinkhorn(mu, nu, C, reg, numItermax=10000)
     return T
 
 def fuse_multiple_models(
@@ -83,7 +78,6 @@ def fuse_models(
     assert isinstance(model_B, nnClass), "model B is of the wrong class"
     assert len(sizes_A) == len(sizes_B), "models do not have the same number of layers"
     assert sizes_A[0][1] == sizes_B[0][1], "models do not have the same input dimension"
-    assert sizes_A[-1][0] == sizes_B[-1][0], "models do not have the same output dimension"
     for i in range(num_layers):
         if bias:
             assert len(sizes_A[2*i]) == len(sizes_B[2*i]) == 2, "expected linear layer, but found wrong parameter shape"
@@ -100,22 +94,24 @@ def fuse_models(
         layer_sizes_B = [sizes_B[0][1]]+[sizes_B[i][0] for i in range(num_layers)]
     input_dim = layer_sizes_A[0]
     fused_params = []
-    T = np.eye(input_dim) / input_dim
+    T = torch.eye(input_dim) / input_dim
     for l in range(num_layers):
         if bias:
-            w_hat = np.matmul(params_A[2 * l].detach().numpy(), T) * T.shape[1]
-            w_hat = np.concatenate((w_hat, params_A[2 * l + 1].detach().numpy()[None, :].T), axis=1)  # add bias layer
-            weights_B = np.concatenate((params_B[2 * l].detach().numpy(), params_B[2 * l + 1].detach().numpy()[None, :].T), axis=1)
+            w_hat = torch.matmul(params_A[2 * l].detach(), T) * T.shape[1]
+            w_hat = torch.cat((w_hat, params_A[2 * l + 1].detach()[None, :].T), dim=1)  # add bias layer
+            weights_B = torch.cat((params_B[2 * l].detach(), params_B[2 * l + 1].detach()[None, :].T), dim=1)
         else:
-            w_hat = np.matmul(params_A[l].detach().numpy(), T) * T.shape[1]
-            weights_B = params_B[l].detach().numpy()
+            w_hat = torch.matmul(params_A[l].detach(), T) * T.shape[1]
+            weights_B = params_B[l].detach()
         T = compute_plan(w_hat, weights_B, reg)
-        w_tilde = T.shape[1] * np.matmul(T.T, w_hat)
+        #print(T)
+        #breakpoint()
+        w_tilde = T.shape[1] * torch.matmul(T.T, w_hat)
         fused_weights = delta * w_tilde + (1 - delta) * weights_B
         if bias:
             fused_layer = fused_weights[:, :-1]
             fused_bias = fused_weights[:, -1:]
-            fused_params += [torch.tensor(fused_layer).flatten(), torch.tensor(fused_bias).flatten()]
+            fused_params += [fused_layer.flatten(), fused_bias.flatten()]
         else:
-            fused_params += [torch.tensor(fused_weights).flatten()]
+            fused_params += [fused_weights.flatten()]
     return nnClass(layer_sizes_B, torch.cat(fused_params).detach().to(params_B[0].dtype), bias=bias)
