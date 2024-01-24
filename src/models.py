@@ -16,7 +16,7 @@ class SimpleNN(nn.Module):
     def __init__(self, layer_sizes, weights = None, temperature = 1, bias = True):
         super(SimpleNN, self).__init__()
 
-        self.layer_sizes = copy(layer_sizes)
+        self.layer_sizes = tuple(copy(layer_sizes))
         self.layers = nn.ModuleList(
             [
                 nn.Sequential(
@@ -36,6 +36,7 @@ class SimpleNN(nn.Module):
 
         self.par_number = sum(p.numel() for p in self.parameters() if p.requires_grad)
         self.bias = bias
+        self.temperature = temperature
 
         if weights is not None:
             self.update_weights(weights)
