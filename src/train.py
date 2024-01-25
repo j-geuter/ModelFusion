@@ -75,7 +75,7 @@ def get_accuracy(model, dataset):
     predicted_labels = get_labels(outputs, labels)
     correct_preds = true_labels == predicted_labels
     accuracy = correct_preds.float().mean()
-    return accuracy
+    return accuracy.item()
 
 
 

@@ -1,5 +1,6 @@
 import ot
 import torch
+from sinkhorn import *
 
 def compute_plan(A, B, reg = None, metric = 'euclidean'):
     """
@@ -19,7 +20,15 @@ def compute_plan(A, B, reg = None, metric = 'euclidean'):
     if reg is None:
         T = ot.emd(mu, nu, C)
     else:
-        T = ot.sinkhorn(mu, nu, C, reg, numItermax=10000)
+        T = sinkhorn(
+            mu,
+            nu,
+            C,
+            reg,
+            max_iter=1000,
+            normThr=1e-4
+        )[1]
+        #T = ot.sinkhorn(mu,nu,C,reg, method='sinkhorn_stabilized', numItermax=5000, stopThr=1e-8)
     return T
 
 def fuse_multiple_models(
