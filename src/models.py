@@ -66,3 +66,35 @@ class SimpleNN(nn.Module):
 
             # Move to the next set of elements in the vector
             vector_index += num_elements
+
+def pad_weights(net, layer_sizes, pad_from='top'):
+    """
+    Creates a new network of size `layer_sizes`, which uses the weights from `net` and pads them in each layer with zeros.
+    :param layer_sizes: list of layer sizes of the new network, of the same format as `self.layer_sizes`.
+    :param pad_from: either `top` or `bottom`, states where to pad from.
+    :return: `SimpleNN` object.
+    """
+    assert len(layer_sizes) == len(net.layer_sizes), "`layer_sizes` must be of same length as `self.layer_sizes`"
+    new_weight_vector = torch.tensor([])
+    layer_weights = [param for param in net.parameters() if param.dim()==2]
+    if net.bias:
+        bias_weights = [param for param in net.parameters() if param.dim()==1]
+    for i in range(1, len(layer_sizes)):
+        layer_size = layer_sizes[i] * layer_sizes[i - 1]
+        nb_zeros = layer_size - net.layer_sizes[i] * net.layer_sizes[i - 1]
+        if pad_from == 'bottom':
+            padded_weights = torch.cat((layer_weights[i-1].detach().clone().flatten(), torch.zeros(nb_zeros)))
+        elif pad_from == 'top':
+            padded_weights = torch.cat((torch.zeros(nb_zeros), layer_weights[i - 1].detach().clone().flatten()))
+        new_weight_vector = torch.cat((new_weight_vector, padded_weights))
+        if net.bias:
+            nb_zeros = layer_sizes[i] - net.layer_sizes[i]
+            if pad_from == 'bottom':
+                padded_bias = torch.cat(
+                    (bias_weights[i - 1].detach().clone().flatten(), torch.zeros(nb_zeros)))
+            elif pad_from == 'top':
+                padded_bias = torch.cat(
+                    (torch.zeros(nb_zeros), bias_weights[i - 1].detach().clone().flatten()))
+            new_weight_vector = torch.cat((new_weight_vector, padded_bias))
+
+    return SimpleNN(layer_sizes, weights=new_weight_vector, bias=net.bias, temperature=net.temperature)

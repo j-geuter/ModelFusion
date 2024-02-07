@@ -70,10 +70,10 @@ for i in range(ITERS):
         data[j]['weights'].append(weights[None, :])
         padded_data[j]['models'].append(padded_model)
         padded_data[j]['weights'].append(padded_weights[None, :])
-    for key, val in data.items():
-        val['weights'] = torch.cat(val['weights'])
-    for key, val in padded_data.items():
-        val['weights'] = torch.cat(val['weights'])
+for key, val in data.items():
+    val['weights'] = torch.cat(val['weights'])
+for key, val in padded_data.items():
+    val['weights'] = torch.cat(val['weights'])
 
 print(f'Parameter count (dataset 0): {data[0]["models"][0].par_number}')
 
@@ -101,7 +101,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Weight average of 1 and 3 on 2:')
 accs = []
 for i in range(ITERS):
-    weights = (data[0]['weights'][i]+data[2]['weights'][i]) / 2
+    weights = (padded_data[0]['weights'][i]+padded_data[2]['weights'][i]) / 2
     model = SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], temperature=1, bias=BIAS, weights=weights)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -110,7 +110,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Fused(1,3) on 2:')
 accs = []
 for i in range(ITERS):
-    fused_model = fuse_models(data[0]['models'][i], data[2]['models'][i], delta=0.5)
+    fused_model = fuse_models(data[0]['models'][i], padded_data[2]['models'][i], delta=0.5)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
@@ -118,7 +118,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Model 1 on dataset 2:')
 accs = []
 for i in range(ITERS):
-    accs.append(get_accuracy(data[0]['models'][i], gmms.datasets[1]))
+    accs.append(get_accuracy(padded_data[0]['models'][i], gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
@@ -133,7 +133,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('Model 3 on dataset 2:')
 accs = []
 for i in range(ITERS):
-    accs.append(get_accuracy(data[2]['models'][i], gmms.datasets[1]))
+    accs.append(get_accuracy(padded_data[2]['models'][i], gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
@@ -159,8 +159,8 @@ print('----------------------------------------------------------------\n\n')
 print('Average of pairwise distances between models across datasets\n')
 pairwise_distances = torch.tensor(
     [
-        [torch.cdist(data[i]['weights'], data[j]['weights']).mean() if i != j else
-         torch.cdist(data[i]['weights'], data[j]['weights'])[~torch.eye(len(data[j]['weights']), dtype=bool)].mean()
+        [torch.cdist(padded_data[i]['weights'], padded_data[j]['weights']).mean() if i != j else
+         torch.cdist(padded_data[i]['weights'], padded_data[j]['weights'])[~torch.eye(len(data[j]['weights']), dtype=bool)].mean()
          for i in range(NUM_DATASETS)]
         for j in range(NUM_DATASETS)
     ]
