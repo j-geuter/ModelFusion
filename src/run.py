@@ -15,18 +15,18 @@ gmms = InterpolGMMs(
     gmm_kwargs2={'l':4,'N':2000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])}
 )
 
-HIDDEN_SIZE = 64
-NUM_HIDDEN_LAYERS = 1
-BIAS = False
+HIDDEN_SIZE = 16
+NUM_HIDDEN_LAYERS = 2
+BIAS = True
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
 D_OUT = gmms.datasets[0][1].size(1)
-
+ITERS = 20
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
-for i in range(5):
+for i in range(ITERS):
     models = [SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS)]
     for j in range(NUM_DATASETS):
         train(
@@ -105,7 +105,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('----------------------------------------------------------------\n')
 print('Accuracy for random weight initialization on dataset 2')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     model = SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -113,7 +113,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 print('----------------------------------------------------------------\n')
 print('Accuracy for average of model 1 and model 3 on dataset 2')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     weights = ((data[0]['weights'][i] + data[2]['weights'][i]) / 2).detach().clone()
     model = SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], weights, bias=BIAS)
     accs.append(get_accuracy(model, gmms.datasets[1]))
@@ -122,7 +122,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Aligned:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     fused_model = fuse_models(data[0]['models'][i], data[2]['models'][i])
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -130,7 +130,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Reverse aligned:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     fused_model = fuse_models(data[2]['models'][i], data[0]['models'][i])
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -138,7 +138,7 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Aligned and regularized, eps=1e-2:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     fused_model = fuse_models(data[0]['models'][i], data[2]['models'][i], reg=1e-2)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -146,14 +146,14 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Model 1 on dataset 2:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     accs.append(get_accuracy(data[0]['models'][i], gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Model 1 aligned to 2:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     fused_model = fuse_models(data[0]['models'][i], data[1]['models'][i], delta=1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
@@ -161,14 +161,14 @@ print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Model 3 on dataset 2:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     accs.append(get_accuracy(data[2]['models'][i], gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
 print('Model 3 aligned to 2:')
 accs = []
-for i in range(5):
+for i in range(ITERS):
     fused_model = fuse_models(data[2]['models'][i], data[1]['models'][i], delta=1)
     accs.append(get_accuracy(fused_model, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
