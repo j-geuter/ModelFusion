@@ -23,7 +23,7 @@ def train(
     :return: train error.
     """
     model.train()
-    optimizer = opt(model.parameters(), lr=lr)
+    optimizer = opt(model.parameters(), lr=lr, weight_decay=1e-2)
     batches = batch_generator(dataset, num_epochs, batch_size)
 
     for (i, (batch_x, batch_y)) in enumerate(batches):
@@ -75,7 +75,7 @@ def get_accuracy(model, dataset):
     predicted_labels = get_labels(outputs, labels)
     correct_preds = true_labels == predicted_labels
     accuracy = correct_preds.float().mean()
-    return accuracy.item()
+    return round(accuracy.item(), 2)
 
 
 
