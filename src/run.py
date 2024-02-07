@@ -12,7 +12,8 @@ torch.manual_seed(1)
 gmms = InterpolGMMs(
     nb_interpol=3,
     gmm_kwargs1={'l':3, 'N':2000, 'mus':5*torch.tensor([[0., 0.],[5., 1.], [3., 4.]]),'lambdas':torch.tensor([2.,10., 20.])},
-    gmm_kwargs2={'l':4,'N':2000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])}
+    gmm_kwargs2={'l':4,'N':2000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])},
+    low_dim_labels=True
 )
 
 HIDDEN_SIZE = 16
@@ -35,7 +36,7 @@ for i in range(ITERS):
             num_epochs=100,
             loss_fn=nn.MSELoss(),
             opt=optim.Adam,
-            lr=0.001
+            lr=0.005
         )
         weights = models[j].get_weight_tensor()
         data[j]['models'].append(models[j])
