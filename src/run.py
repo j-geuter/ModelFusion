@@ -31,7 +31,7 @@ NUM_HIDDEN_LAYERS = 2
 BIAS = True
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
-D_OUT = gmms.gmms[-1].l
+D_OUT = sum([gmm.l for gmm in gmms.gmms])
 ITERS = 20
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
