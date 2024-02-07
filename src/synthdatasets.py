@@ -17,7 +17,7 @@ class GMM:
             lambdas=None,
             mus=None,
             Sigmas=None,
-            exact_lambdas=True
+            exact_lambdas=False
     ):
         """
         Class to create Gaussian mixture models. Creates `N` training samples.

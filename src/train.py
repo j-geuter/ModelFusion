@@ -23,7 +23,7 @@ def train(
     :return: train error.
     """
     model.train()
-    optimizer = opt(model.parameters(), lr=lr, weight_decay=1e-2)
+    optimizer = opt(model.parameters(), lr=lr)
     batches = batch_generator(dataset, num_epochs, batch_size)
 
     for (i, (batch_x, batch_y)) in enumerate(batches):
