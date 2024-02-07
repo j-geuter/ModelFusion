@@ -10,9 +10,9 @@ from fusion import *
 torch.manual_seed(1)
 
 gmms = InterpolGMMs(
-    nb_interpol=5,
-    gmm_kwargs1={'l':3, 'N':5000, 'mus':5*torch.tensor([[0., 0.],[5., 1.], [3., 4.]]),'lambdas':torch.tensor([2.,10., 20.])},
-    gmm_kwargs2={'l':4,'N':5000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])}
+    nb_interpol=3,
+    gmm_kwargs1={'l':3, 'N':2000, 'mus':5*torch.tensor([[0., 0.],[5., 1.], [3., 4.]]),'lambdas':torch.tensor([2.,10., 20.])},
+    gmm_kwargs2={'l':4,'N':2000,'mus':5*torch.tensor([[0., 2.],[1., 1.],[2., 2.], [4., 4.]]), 'lambdas': torch.tensor([10., 2., 2., 2.])}
 )
 
 HIDDEN_SIZE = 64
@@ -21,6 +21,7 @@ BIAS = False
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
 D_OUT = gmms.datasets[0][1].size(1)
+
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
@@ -31,7 +32,7 @@ for i in range(5):
         train(
             models[j],
             gmms.datasets[j],
-            num_epochs=2,
+            num_epochs=100,
             loss_fn=nn.MSELoss(),
             opt=optim.Adam,
             lr=0.001
