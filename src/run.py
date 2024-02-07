@@ -37,6 +37,8 @@ ITERS = 20
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
+padded_data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
+
 for i in range(ITERS):
     models = [
                  SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [gmms.datasets[0][1].size(1)], temperature=1, bias=BIAS)
@@ -55,10 +57,23 @@ for i in range(ITERS):
             lr=0.005
         )
         weights = models[j].get_weight_tensor()
+        if j == 0:
+            padded_model = pad_weights(models[j], [D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT],
+                                       pad_from='bottom')
+        elif j == NUM_DATASETS - 1:
+            padded_model = pad_weights(models[j], [D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT],
+                                       pad_from='top')
+        else:
+            padded_model = models[j]
+        padded_weights = padded_model.get_weight_tensor()
         data[j]['models'].append(models[j])
         data[j]['weights'].append(weights[None, :])
-for key, val in data.items():
-    val['weights'] = torch.cat(val['weights'])
+        padded_data[j]['models'].append(padded_model)
+        padded_data[j]['weights'].append(padded_weights[None, :])
+    for key, val in data.items():
+        val['weights'] = torch.cat(val['weights'])
+    for key, val in padded_data.items():
+        val['weights'] = torch.cat(val['weights'])
 
 print(f'Parameter count (dataset 0): {data[0]["models"][0].par_number}')
 
