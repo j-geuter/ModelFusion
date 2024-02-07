@@ -62,6 +62,7 @@ class GMM:
             lambda_sum = sum(self.lambdas)
             frequencies = [int(n * lamb / lambda_sum) for lamb in self.lambdas]
             indices = torch.tensor([i for i in range(self.l) for _ in range(frequencies[i])])
+            assert len(indices) == n, "cannot produce samples with exact lambdas (number of samples not divisible by sum of lambdas)"
             indices = indices[perm]
         sorted_indices, perm = torch.sort(indices)
         samples = torch.cat(([self.dists[i].sample((torch.sum(torch.eq(indices, i)).item(),)) for i in range(self.l)]),
