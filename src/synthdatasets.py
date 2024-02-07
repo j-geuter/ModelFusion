@@ -166,6 +166,7 @@ class InterpolGMMs:
         n_samples = self.gmms[0].N
         cost = torch.cdist(self.gmms[0].train_samples[0], self.gmms[1].train_samples[0])
         T = ot.emd(mu, nu, cost)
+        self.plan = T
         self.label_dim = sum(gmm.l for gmm in self.gmms)
         l_counter = 0
         for gmm in self.gmms:
@@ -184,6 +185,10 @@ class InterpolGMMs:
         non_zero_indices = torch.nonzero(T)
         assert len(non_zero_indices) == len(mu)
         row_indices, col_indices = non_zero_indices.unbind(1)
+        self.row_indices = row_indices
+        assert row_indices == torch.tensor([i for i in range(len(mu))])
+        self.forward_indices = col_indices # mapping indices of T
+        self.inv_indices = col_indices.sort()[1] # mapping indices of T inverse
         x1_features = self.gmms[0].train_samples[0][row_indices]
         x2_features = self.gmms[1].train_samples[0][col_indices]
         x1_labels = self.gmms[0].train_samples[1][row_indices]

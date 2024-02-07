@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from copy import copy
+from copy import copy, deepcopy
 
 class TemperatureScaledSoftmax(nn.Module):
     def __init__(self, temperature):
@@ -66,6 +66,35 @@ class SimpleNN(nn.Module):
 
             # Move to the next set of elements in the vector
             vector_index += num_elements
+
+
+class MergeNN(nn.Module):
+    def __init__(self, model_1, model_2, plan_2, dataset_1, dataset_2, dataset_star):
+        super(MergeNN, self).__init__()
+        self.nb_samples = plan_2.shape[0]
+        self.model_1 = model_1
+        self.model_2 = model_2
+        self.plan_1 = torch.eye(self.nb_samples)
+        self.plan_2 = plan_2
+        self.dataset_1 = deepcopy(dataset_1)
+        self.dataset_2 = deepcopy(dataset_2)
+        self.dataset_star = deepcopy(dataset_star)
+        nonzero_indices = torch.nonzero(plan_2)
+        self.forward_indices = nonzero_indices.unbind(1)[1]
+        self.inverse_indices = self.forward_indices.sort()[1]
+
+        # align dataset_2 with the other datasets
+        for i in range(2):
+            self.dataset_star[i] = self.dataset_star[self.forward_indices]
+
+    def forward(self, x):
+
+
+def forward_plan(x, from_dataset, to_dataset):
+
+
+
+
 
 def pad_weights(net, layer_sizes, pad_from='top'):
     """
