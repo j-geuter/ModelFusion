@@ -15,8 +15,7 @@ def train(
     """
     Train a `model` on a `dataset`.
     :param model: model, nn.Module type.
-    :param dataset: 2-tuple of Tensors, where the first is `(N,d)` shaped and corresponds to features,
-        and the second is `(N,l)` shaped and corresponds to labels.
+    :param dataset: dataset of type `CustomDataset`.
     :param num_epochs: number of epochs.
     :param batch_size: batch size.
     :param loss_fn: loss function.
@@ -48,8 +47,8 @@ def test(model, dataset):
     """
     model.eval()
     loss_fn = nn.CrossEntropyLoss()
-    outputs = model(dataset[0])
-    loss = loss_fn(outputs, dataset[1])
+    outputs = model(dataset.features)
+    loss = loss_fn(outputs, dataset.labels)
     return loss.item()
 
 def get_accuracy(model, dataset):
@@ -63,26 +62,24 @@ def get_accuracy(model, dataset):
     """
     model.eval()
 
-    labels = torch.unique(dataset[1], dim=0) # all labels present in the dataset
-    outputs = model(dataset[0])
-
-    def get_labels(preds, labels):
-        dists = torch.cdist(preds, labels)
-        closest = torch.argmin(dists, dim=1)
-        return closest
-
-    true_labels = get_labels(dataset[1], labels)
+    labels = dataset.unique_labels # all labels present in the dataset
+    outputs = model(dataset.features)
+    true_labels = get_labels(dataset.labels, labels)
     predicted_labels = get_labels(outputs, labels)
     correct_preds = true_labels == predicted_labels
     accuracy = correct_preds.float().mean()
     return round(accuracy.item(), 2)
 
+def get_labels(preds, labels):
+    dists = torch.cdist(preds, labels)
+    closest = torch.argmin(dists, dim=1)
+    return closest
 
 
 
 def batch_generator(dataset, num_epochs, batch_size):
 
-    x_samples, labels = dataset[0], dataset[1]
+    x_samples, labels = dataset.features, dataset.labels
     num_samples = len(x_samples)
 
     for epoch in range(num_epochs):

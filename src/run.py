@@ -41,11 +41,11 @@ padded_data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}
 
 for i in range(ITERS):
     models = [
-                 SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [gmms.datasets[0][1].size(1)], temperature=1, bias=BIAS)
+                 SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [gmms.datasets[0].label_dim], temperature=1, bias=BIAS)
              ] + [
         SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [D_OUT], temperature=1, bias=BIAS) for _ in range(NUM_DATASETS - 2)
     ] + [
-        SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [gmms.datasets[-1][1].size(1)], temperature=1, bias=BIAS)
+        SimpleNN([D_IN] + [HIDDEN_SIZE] * NUM_HIDDEN_LAYERS + [gmms.datasets[-1].label_dim], temperature=1, bias=BIAS)
     ]
     for j in range(NUM_DATASETS):
         train(
@@ -75,7 +75,12 @@ for key, val in data.items():
 for key, val in padded_data.items():
     val['weights'] = torch.cat(val['weights'])
 
-print(f'Parameter count (dataset 0): {data[0]["models"][0].par_number}')
+print(f'Parameter counts: {[data[i]["models"][0].par_number for i in range(NUM_DATASETS)]}')
+
+mergedNNs = [
+    MergeNN(data[0]['models'][i], data[2]['models'][i], gmms.plan, gmms.datasets[0], gmms.datasets[2], gmms.datasets[1])
+    for i in range(ITERS)
+]
 
 print('Model 1 on dataset 1:')
 accs = []
@@ -115,6 +120,13 @@ for i in range(ITERS):
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
+print('MergedNN on 2:')
+accs = []
+for mergedNN in mergedNNs:
+    accs.append(get_accuracy(mergedNN, gmms.datasets[1]))
+avg = sum(accs) / len(accs)
+print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
+
 print('Model 1 on dataset 2:')
 accs = []
 for i in range(ITERS):
@@ -145,6 +157,7 @@ for i in range(ITERS):
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
+"""
 print('Model 1 aligned to the previous 1:')
 accs = []
 for i in range(ITERS):
@@ -199,7 +212,7 @@ pairwise_aligned_distances = torch.tensor(
 )
 print(pairwise_aligned_distances)
 
-"""
+
 print('----------------------------------------------------------------\n')
 print('----------------------------------------------------------------\n\n')
 print('Pairwise distances between avg. models for each dataset\n')
