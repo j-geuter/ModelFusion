@@ -45,9 +45,11 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         return self.features[index], self._labels[index]
 
-    def get_samples_by_label(self, target_label):
+    def get_samples_by_label(self, target_label, idx=None):
         # Given a target_label, return features of samples with that label and the indices
         mask = torch.all(self._labels == target_label, dim=1)
+        if idx is not None:
+            mask[idx]=False
         return self.features[mask], torch.where(mask)[0]
 
 class GMM:

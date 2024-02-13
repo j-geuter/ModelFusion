@@ -98,40 +98,63 @@ class MergeNN(nn.Module):
 
         # find the x samples that are contained in dataset_star and those that aren't
         match_samples, match_indices = matches.unbind(1)
-        unmatched_samples = torch.tensor([i for i in range(len(x)) if i not in match_samples])
+        match_samples = match_samples.to(torch.int)
+        unmatched_sample_indices = torch.tensor([i for i in range(len(x)) if i not in match_samples], dtype=torch.int)
         # x_matched = x[match_samples]
-        # x_unmatched = x[unmatched_samples]
-        assert len(unmatched_samples) == 0, "not implemented yet"
-
+        if len(unmatched_sample_indices) != 0:
+            x_unmatched = x[unmatched_sample_indices]
+            unmatched_x_transported = [self.transport_features(x_unmatched, dataset) for dataset in self.datasets]
+        else:
+            unmatched_x_transported = [torch.zeros((0, dataset.feature_dim)) for dataset in self.datasets]
         # transport the samples to the outer datasets and compute the resp. predictions in those datasets
-        x_transported = [dataset[match_indices][0] for dataset in self.datasets]
+        if len(match_indices) != 0:
+            matched_x_transported = [dataset[match_indices][0] for dataset in self.datasets]
+        else:
+            matched_x_transported = [torch.zeros((0, dataset.feature_dim)) for dataset in self.datasets]
+        x_transported = [torch.zeros(x.shape) for _ in self.datasets]
+        for item, x_matched, x_unmatched in zip(x_transported, matched_x_transported, unmatched_x_transported):
+            item[unmatched_sample_indices] = x_unmatched
+            item[match_samples] = x_matched
         y_transported = [model(samples) for model, samples in zip(self.models, x_transported)]
         y_projected = [project_labels(y, dataset.unique_labels) for y, dataset in zip(y_transported, self.datasets)]
 
         # transport the predictions back to dataset_star space and aggregate
-        y_star = [self.project_labels(features, y, dataset_from=dataset) for features, y, dataset in zip(x_transported, y_projected, self.datasets)]
+        y_star = [self.transport_labels(features, y, dataset) for features, y, dataset in zip(x_transported, y_projected, self.datasets)]
         y = sum(y_star) / len(y_star)
         return y
 
-    def project_features(self, x, dataset_to):
+
+    def transport_features(self, x, dataset_to):
         """
         Projects features `x` from `dataset_star` to `dataset_to` using the transport map.
         :param x: feature tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
         :param dataset_to: the dataset that the features are mapped to.
         :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
         """
+        transported_features = dataset_to.features
+        exponentials = torch.exp(
+            -torch.cdist(
+                self.dataset_star.features, x
+            ) ** 2
+        )
+        weighted_transported_features = torch.matmul(transported_features.T, exponentials)
+        normalized_transported_features = weighted_transported_features / exponentials.sum(dim=0)
+        return normalized_transported_features.T
 
-    def project_labels(self, x, y, dataset_from):
+
+    def transport_labels(self, x, y, dataset_from, match_indices=None):
         """
-        Projects labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
+        Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
         :param x: tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
         :param y: tensor of size k*d_y, where k is the number of labels, and d_y their dimension.
         :param dataset_from: the dataset that the labels `y` live in.
         :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
         """
         output_labels = torch.zeros((y.shape[0], self.dataset_star.label_dim))
+        if match_indices is None:
+            match_indices = [None for _ in range(y.shape[0])]
         for i in range(y.shape[0]):
-            same_label_features, indices = dataset_from.get_samples_by_label(y[i])
+            same_label_features, indices = dataset_from.get_samples_by_label(y[i], match_indices[i])
             num_samples = same_label_features.shape[0]
             exponentials = torch.exp(
                 -torch.norm(
