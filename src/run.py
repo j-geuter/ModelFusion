@@ -120,14 +120,13 @@ for i in range(ITERS):
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
 
-t = time()
+
 print('MergedNN on 2:')
 accs = []
 for mergedNN in mergedNNs:
     accs.append(get_accuracy(mergedNN, gmms.datasets[1]))
 avg = sum(accs) / len(accs)
 print(f'Accuracies: {accs}, avg. accuracy: {avg}\n')
-print(time()-t)
 
 print('Model 1 on dataset 2:')
 accs = []

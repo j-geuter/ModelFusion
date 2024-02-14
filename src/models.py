@@ -159,18 +159,18 @@ class MergeNN(nn.Module):
         if match_indices is None:
             match_indices = [None for _ in range(y.shape[0])]
         if method == 'match_label':
-            for i in range(y.shape[0]):
-                same_label_features, indices = dataset_from.get_samples_by_label(y[i], match_indices[i])
-                num_samples = same_label_features.shape[0]
-                exponentials = torch.exp(
-                    -torch.norm(
-                        same_label_features - x[i].expand(num_samples, -1),
-                        dim=1
-                    )**2
-                ).unsqueeze(1)
-                y_transported = self.dataset_star[indices][1].T # labels transported to dataset_star
-                y_aggregated = torch.matmul(y_transported, exponentials) / exponentials.sum()
-                output_labels[i] = y_aggregated.squeeze()
+
+            # define mask with (i,j)^th entry 1 iff the i^th label in the dataset is equal to the j^th label in y
+            mask = torch.all((dataset_from.labels.unsqueeze(1)==y.unsqueeze(0)), dim=2).to(int)
+
+            transported_y = self.dataset_star.labels
+            masked_exponentials = torch.exp(
+                -torch.cdist(
+                    dataset_from.features, x
+                ) ** 2
+            ) * mask
+            weighted_transported_labels = torch.matmul(transported_y.T, masked_exponentials)
+            normalized_transported_labels = (weighted_transported_labels / masked_exponentials.sum(dim=0)).T
         elif method == 'all_samples':
             pass
         elif method == 'label_distance':
@@ -178,7 +178,7 @@ class MergeNN(nn.Module):
         else:
             raise ValueError(f"Method {method} not implemented! "
                              f"Choose one of 'match_label', 'all_samples', or 'label_distance'.")
-        return output_labels
+        return normalized_transported_labels
 
 
 
