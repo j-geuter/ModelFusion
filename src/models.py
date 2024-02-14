@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from copy import copy, deepcopy
+from time import time
 
 class TemperatureScaledSoftmax(nn.Module):
     def __init__(self, temperature):
@@ -142,29 +143,41 @@ class MergeNN(nn.Module):
         return normalized_transported_features.T
 
 
-    def transport_labels(self, x, y, dataset_from, match_indices=None):
+    def transport_labels(self, x, y, dataset_from, method='match_label', match_indices=None):
         """
         Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
         :param x: tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
         :param y: tensor of size k*d_y, where k is the number of labels, and d_y their dimension.
         :param dataset_from: the dataset that the labels `y` live in.
+        :param method: defines the method used to compute the transported label. One of 'match_label'
+            (in which case only samples with matching labels are considered), 'all_samples' (in which
+            case all samples are considered), or 'label_distance' (in which case the distance matrix
+            between labels is used for transport).
         :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
         """
         output_labels = torch.zeros((y.shape[0], self.dataset_star.label_dim))
         if match_indices is None:
             match_indices = [None for _ in range(y.shape[0])]
-        for i in range(y.shape[0]):
-            same_label_features, indices = dataset_from.get_samples_by_label(y[i], match_indices[i])
-            num_samples = same_label_features.shape[0]
-            exponentials = torch.exp(
-                -torch.norm(
-                    same_label_features - x[i].expand(num_samples, -1),
-                    dim=1
-                )**2
-            ).unsqueeze(1)
-            y_transported = self.dataset_star[indices][1].T # labels transported to dataset_star
-            y_aggregated = torch.matmul(y_transported, exponentials) / exponentials.sum()
-            output_labels[i] = y_aggregated.squeeze()
+        if method == 'match_label':
+            for i in range(y.shape[0]):
+                same_label_features, indices = dataset_from.get_samples_by_label(y[i], match_indices[i])
+                num_samples = same_label_features.shape[0]
+                exponentials = torch.exp(
+                    -torch.norm(
+                        same_label_features - x[i].expand(num_samples, -1),
+                        dim=1
+                    )**2
+                ).unsqueeze(1)
+                y_transported = self.dataset_star[indices][1].T # labels transported to dataset_star
+                y_aggregated = torch.matmul(y_transported, exponentials) / exponentials.sum()
+                output_labels[i] = y_aggregated.squeeze()
+        elif method == 'all_samples':
+            pass
+        elif method == 'label_distance':
+            pass
+        else:
+            raise ValueError(f"Method {method} not implemented! "
+                             f"Choose one of 'match_label', 'all_samples', or 'label_distance'.")
         return output_labels
 
 
