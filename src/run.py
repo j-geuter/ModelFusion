@@ -32,7 +32,7 @@ BIAS = True
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
 D_OUT = sum([gmm.l for gmm in gmms.gmms])
-ITERS = 1
+ITERS = 2
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {'models': [], 'weights': []} for j in range(NUM_DATASETS)}

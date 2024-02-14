@@ -21,6 +21,10 @@ class CustomDataset(Dataset):
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
         self.high_dim_labels = None
+        self.label_indices = torch.all(
+            self._labels[:, None, :] == self.unique_labels[None, :, :],
+            dim=2
+        ).to(int).argmax(dim=1)
 
     def __len__(self):
         return self.num_samples
@@ -37,6 +41,10 @@ class CustomDataset(Dataset):
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
+        self.label_indices = torch.all(
+            self._labels[:, None, :] == self.unique_labels[None, :, :],
+            dim=2
+        ).to(int).argmax(dim=1)
 
     def permute_data(self, permutation):
         features, labels = self.features[permutation], self.labels[permutation]
@@ -209,7 +217,7 @@ class InterpolGMMs:
         nu = torch.ones(self.gmms[1].N) / self.gmms[1].N
         assert len(mu) == len(nu)
         n_samples = self.gmms[0].N
-        cost = torch.cdist(self.gmms[0].train_samples[0], self.gmms[1].train_samples[0])
+        cost = torch.cdist(self.gmms[0].train_samples[0], self.gmms[1].train_samples[0])**2
         T = ot.emd(mu, nu, cost)
         self.plan = T
         self.label_dim = sum(gmm.l for gmm in self.gmms)
