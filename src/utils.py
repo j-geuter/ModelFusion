@@ -1,5 +1,6 @@
 import torch
 
+
 def models_equal(model1, model2, tolerance=1e-5):
     """
     Checks if two models `model1` and `model2` are identical, up to tolerance `tolerance`.
@@ -9,7 +10,9 @@ def models_equal(model1, model2, tolerance=1e-5):
     assert model1.__class__ == model2.__class__, "Model classes do not match"
 
     # Check if the models have the same number of parameters
-    assert sum(p.numel() for p in model1.parameters()) == sum(p.numel() for p in model2.parameters()), "Parameter count does not match"
+    assert sum(p.numel() for p in model1.parameters()) == sum(
+        p.numel() for p in model2.parameters()
+    ), "Parameter count does not match"
 
     # Check if the parameters are identical up to the tolerance
     for param1, param2 in zip(model1.parameters(), model2.parameters()):
@@ -20,7 +23,8 @@ def models_equal(model1, model2, tolerance=1e-5):
 
     return True
 
-def weights_equal(weights_1, weights_2, tol = 1e-5):
+
+def weights_equal(weights_1, weights_2, tol=1e-5):
     """
     Checks if two weight vectors are identical, up to tolerance `tol`.
     :return: True if they are identical, False otherwise.

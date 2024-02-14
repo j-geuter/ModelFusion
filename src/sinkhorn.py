@@ -1,23 +1,24 @@
 import torch
 from logger import logging
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def sinkhorn(
-                d1,
-                d2,
-                C,
-                eps,
-                max_iter = 100,
-                start = None,
-                log = False,
-                mcvThr = 0,
-                normThr = 0,
-                tens_type = torch.float32,
-                verbose = False,
-                min_start = None,
-                max_start = None
-            ):
+    d1,
+    d2,
+    C,
+    eps,
+    max_iter=100,
+    start=None,
+    log=False,
+    mcvThr=0,
+    normThr=0,
+    tens_type=torch.float32,
+    verbose=False,
+    min_start=None,
+    max_start=None,
+):
     """
     Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
     :param d1: first distribution. Two-dimensional tensor where first dimension corresponds to number of samples and second dimension to sample size. Can also be 1D for a single sample.
@@ -42,46 +43,87 @@ def sinkhorn(
     if nu.dim() == 1:
         nu = nu[None, :]
     if start == None:
-        start  = torch.ones(mu.size())
+        start = torch.ones(mu.size())
     start = start.detach().to(device)
     if max_start:
-        start = torch.where(start<torch.tensor(max_start).to(start.dtype).to(device), start, torch.tensor(max_start).to(start.dtype).to(device))
+        start = torch.where(
+            start < torch.tensor(max_start).to(start.dtype).to(device),
+            start,
+            torch.tensor(max_start).to(start.dtype).to(device),
+        )
     if min_start:
-        start = torch.where(start>torch.tensor(min_start).to(start.dtype).to(device), start, torch.tensor(min_start).to(start.dtype).to(device))
+        start = torch.where(
+            start > torch.tensor(min_start).to(start.dtype).to(device),
+            start,
+            torch.tensor(min_start).to(start.dtype).to(device),
+        )
     mu = mu.T.to(tens_type)
     nu = nu.T.to(tens_type)
     start = start.T.to(tens_type)
-    K = torch.exp(-C/eps).to(tens_type).to(device)
+    K = torch.exp(-C / eps).to(tens_type).to(device)
     v = start.clone()
     it = max_iter
     for i in range(max_iter):
         prev_v = v.clone()
-        u = mu/torch.matmul(K, v)
-        v = nu/torch.matmul(K.T, u)
+        u = mu / torch.matmul(K, v)
+        v = nu / torch.matmul(K.T, u)
         if normThr > 0:
-            if torch.all((torch.norm(prev_v - v, dim=0) / torch.norm(v, dim=0)) < normThr):
+            if torch.all(
+                (torch.norm(prev_v - v, dim=0) / torch.norm(v, dim=0)) < normThr
+            ):
                 it = i + 1
                 if verbose:
-                    logging.info(f'Accuracy below threshold. Early termination after {it} iterations.')
+                    logging.info(
+                        f"Accuracy below threshold. Early termination after {it} iterations."
+                    )
                 break
         if mcvThr > 0:
-            gamma = torch.matmul(torch.cat([torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]), torch.matmul(K, torch.cat([torch.diag(v.T[j]).to(device)[None, :] for j in range(u.size(1))])))
-            mu_star = torch.matmul(gamma, torch.ones(u.size(0)).to(tens_type).to(device))
-            nu_star = torch.matmul(torch.ones(u.size(0)).to(tens_type).to(device), gamma)
+            gamma = torch.matmul(
+                torch.cat(
+                    [torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]
+                ),
+                torch.matmul(
+                    K,
+                    torch.cat(
+                        [
+                            torch.diag(v.T[j]).to(device)[None, :]
+                            for j in range(u.size(1))
+                        ]
+                    ),
+                ),
+            )
+            mu_star = torch.matmul(
+                gamma, torch.ones(u.size(0)).to(tens_type).to(device)
+            )
+            nu_star = torch.matmul(
+                torch.ones(u.size(0)).to(tens_type).to(device), gamma
+            )
             mu_err = (mu.T - mu_star).abs().sum(1)
             nu_err = (nu.T - nu_star).abs().sum(1)
-            if (mu_err < mcvThr).sum().item() == mu_err.size(0) and (nu_err < mcvThr).sum().item() == nu_err.size(0):
+            if (mu_err < mcvThr).sum().item() == mu_err.size(0) and (
+                nu_err < mcvThr
+            ).sum().item() == nu_err.size(0):
                 it = i + 1
                 if verbose:
-                    logging.info(f'Accuracy below threshold. Early termination after {it} iterations.')
+                    logging.info(
+                        f"Accuracy below threshold. Early termination after {it} iterations."
+                    )
                 break
-    gamma = torch.matmul(torch.cat([torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]), torch.matmul(K, torch.cat([torch.diag(v.T[j]).to(device)[None, :] for j in range(u.size(1))])))
+    gamma = torch.matmul(
+        torch.cat([torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]),
+        torch.matmul(
+            K,
+            torch.cat(
+                [torch.diag(v.T[j]).to(device)[None, :] for j in range(u.size(1))]
+            ),
+        ),
+    )
     cost = (gamma * C).sum(1).sum(1)
     if not log:
-        perc_nan = 100*cost.isnan().sum()/len(cost)
+        perc_nan = 100 * cost.isnan().sum() / len(cost)
         if perc_nan > 0:
-            perc_nan = '%.2f'%perc_nan
-            logging.warning(f'{perc_nan}% of transport costs are NaN.')
+            perc_nan = "%.2f" % perc_nan
+            logging.warning(f"{perc_nan}% of transport costs are NaN.")
         return cost, gamma.squeeze()
     else:
         mu_star = torch.matmul(gamma, torch.ones(u.size(0)).to(tens_type).to(device))
@@ -89,34 +131,46 @@ def sinkhorn(
 
         mu_err = (mu.T - mu_star).abs().sum(1)
         mu_nan = mu_err.isnan().sum()
-        mu_err = torch.where(mu_err.isnan(), torch.tensor(0).to(tens_type).to(device), mu_err)
+        mu_err = torch.where(
+            mu_err.isnan(), torch.tensor(0).to(tens_type).to(device), mu_err
+        )
 
         nu_err = (nu.T - nu_star).abs().sum(1)
         nu_nan = nu_err.isnan().sum()
-        nu_err = torch.where(nu_err.isnan(), torch.tensor(0).to(tens_type).to(device), nu_err)
+        nu_err = torch.where(
+            nu_err.isnan(), torch.tensor(0).to(tens_type).to(device), nu_err
+        )
 
-        if mu_nan/mu_err.size(0) > 0.1 or nu_nan/nu_err.size(0) > 0.1:
-            perc1 = 100*mu_nan/mu_err.size(0)
-            perc2 = 100*nu_nan/nu_err.size(0)
-            perc = '%.2f'%((perc1 + perc2)/2)
+        if mu_nan / mu_err.size(0) > 0.1 or nu_nan / nu_err.size(0) > 0.1:
+            perc1 = 100 * mu_nan / mu_err.size(0)
+            perc2 = 100 * nu_nan / nu_err.size(0)
+            perc = "%.2f" % ((perc1 + perc2) / 2)
             if verbose:
-                logging.warning(f'{perc}% of marginal constraint violations are NaN.')
+                logging.warning(f"{perc}% of marginal constraint violations are NaN.")
 
-        mu_err = mu_err.sum()/(mu_err.size(0) - mu_nan)
-        nu_err = nu_err.sum()/(nu_err.size(0) - nu_nan)
-        return {'cost': cost, 'plan': gamma.squeeze(), 'iterations': it, 'u': eps * torch.log(u).T, 'v': eps * torch.log(v).T, 'avgMCV': (mu_err + nu_err)/2}
+        mu_err = mu_err.sum() / (mu_err.size(0) - mu_nan)
+        nu_err = nu_err.sum() / (nu_err.size(0) - nu_nan)
+        return {
+            "cost": cost,
+            "plan": gamma.squeeze(),
+            "iterations": it,
+            "u": eps * torch.log(u).T,
+            "v": eps * torch.log(v).T,
+            "avgMCV": (mu_err + nu_err) / 2,
+        }
+
 
 def log_sinkhorn(
-                    mu,
-                    nu,
-                    C,
-                    eps,
-                    max_iter = 100,
-                    start_f = None,
-                    start_g = None,
-                    log = False,
-                    tens_type = torch.float32
-                ):
+    mu,
+    nu,
+    C,
+    eps,
+    max_iter=100,
+    start_f=None,
+    start_g=None,
+    log=False,
+    tens_type=torch.float32,
+):
     """
     Sinkhorn's algorithm in log domain to compute the dual potentials and the dual problem value.
     :param mu: first distribution. One-dimensional tensor. Also supports two-dimensional tensor with an empty first dimension.
@@ -135,7 +189,11 @@ def log_sinkhorn(
         Auxiliary function for log_sinkhorn.
         """
         ones = torch.ones(pot1.size())[None, :].to(pot1.dtype).to(device)
-        return cost - torch.matmul(pot1[None, :].T, ones) - torch.matmul(ones.T, pot2[None, :])
+        return (
+            cost
+            - torch.matmul(pot1[None, :].T, ones)
+            - torch.matmul(ones.T, pot2[None, :])
+        )
 
     def row_min(A, eps):
         """
@@ -150,19 +208,26 @@ def log_sinkhorn(
     mu = mu.to(tens_type).to(device)
     nu = nu.to(tens_type).to(device)
     if start_f == None:
-        start_f  = torch.zeros(mu.size())
+        start_f = torch.zeros(mu.size())
     if start_g == None:
-        start_g  = torch.ones(mu.size())
+        start_g = torch.ones(mu.size())
     start_f = start_f.detach().to(tens_type).to(device)
     start_g = start_g.detach().to(tens_type).to(device)
     f = start_f
     g = start_g
     for i in range(max_iter):
-        f = row_min(S(C, f, g),   eps) + f + eps * torch.log(mu)
-        g = row_min(S(C, f, g).T, eps) + g + eps * torch.log(nu) # the column minimum function is equivalent to the row minimum function of the transpose
-    gamma = torch.matmul(torch.diag(torch.exp(f/eps)).to(device), torch.matmul(torch.exp(-C.to(tens_type)/eps), torch.diag(torch.exp(g/eps)).to(device)))
+        f = row_min(S(C, f, g), eps) + f + eps * torch.log(mu)
+        g = (
+            row_min(S(C, f, g).T, eps) + g + eps * torch.log(nu)
+        )  # the column minimum function is equivalent to the row minimum function of the transpose
+    gamma = torch.matmul(
+        torch.diag(torch.exp(f / eps)).to(device),
+        torch.matmul(
+            torch.exp(-C.to(tens_type) / eps), torch.diag(torch.exp(g / eps)).to(device)
+        ),
+    )
     cost = (gamma * C.to(tens_type)).sum().item()
     if not log:
         return cost, gamma.squeeze()
     else:
-        return {'cost': cost, 'plan': gamma.squeeze(), 'u': f.T, 'v': g.T}
+        return {"cost": cost, "plan": gamma.squeeze(), "u": f.T, "v": g.T}

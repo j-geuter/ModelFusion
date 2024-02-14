@@ -1,16 +1,18 @@
 import torch
-import torch.optim as optim
 import torch.nn as nn
+import torch.optim as optim
+
 from models import *
 
+
 def train(
-        model,
-        dataset,
-        num_epochs = 20,
-        batch_size = 128,
-        loss_fn = nn.CrossEntropyLoss(),
-        lr = 0.1,
-        opt = optim.SGD,
+    model,
+    dataset,
+    num_epochs=20,
+    batch_size=128,
+    loss_fn=nn.CrossEntropyLoss(),
+    lr=0.1,
+    opt=optim.SGD,
 ):
     """
     Train a `model` on a `dataset`.
@@ -25,7 +27,7 @@ def train(
     optimizer = opt(model.parameters(), lr=lr, weight_decay=1e-3)
     batches = batch_generator(dataset, num_epochs, batch_size)
 
-    for (i, (batch_x, batch_y)) in enumerate(batches):
+    for i, (batch_x, batch_y) in enumerate(batches):
 
         outputs = model(batch_x)
         loss = loss_fn(outputs, batch_y)
@@ -37,9 +39,10 @@ def train(
 
         # Print training statistics
         # if i % 10 == 0:
-            # print(f'Iteration {i}, Loss: {loss.item():.4f}')
+        # print(f'Iteration {i}, Loss: {loss.item():.4f}')
     accuracy = get_accuracy(model, dataset)
-    print(f'Final loss: {loss}; accuracy: {accuracy}')
+    print(f"Final loss: {loss}; accuracy: {accuracy}")
+
 
 def test(model, dataset):
     """
@@ -50,6 +53,7 @@ def test(model, dataset):
     outputs = model(dataset.features)
     loss = loss_fn(outputs, dataset.labels)
     return loss.item()
+
 
 def get_accuracy(model, dataset):
     """
@@ -62,7 +66,7 @@ def get_accuracy(model, dataset):
     """
     model.eval()
 
-    labels = dataset.unique_labels # all labels present in the dataset
+    labels = dataset.unique_labels  # all labels present in the dataset
     outputs = model(dataset.features)
     true_labels = get_labels(dataset.labels, labels)
     predicted_labels = get_labels(outputs, labels)
@@ -70,11 +74,11 @@ def get_accuracy(model, dataset):
     accuracy = correct_preds.float().mean()
     return round(accuracy.item(), 2)
 
+
 def get_labels(preds, labels):
     dists = torch.cdist(preds, labels)
     closest = torch.argmin(dists, dim=1)
     return closest
-
 
 
 def batch_generator(dataset, num_epochs, batch_size):
@@ -88,7 +92,7 @@ def batch_generator(dataset, num_epochs, batch_size):
 
         # Iterate over batches
         for i in range(0, num_samples, batch_size):
-            batch_indices = indices[i:i + batch_size]
+            batch_indices = indices[i : i + batch_size]
 
             # Extract batch data
             batch_x = x_samples[batch_indices]
