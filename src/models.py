@@ -82,23 +82,63 @@ class SimpleNN(nn.Module):
 
 class MergeNN(nn.Module):
     def __init__(
-        self, model_1, model_2, plan, dataset_1, dataset_2, dataset_star, eta=0.01
+        self, models, datasets, dataset_star, plan=None, plan_indices=None, permute_star=False, eta=1
     ):
+        """
+        Creates a non-parametric model from `models` trained on `datasets`.
+        The model can be used on `dataset_star`, but internally transports samples
+        from `dataset_star` to the other `datasets` to use `models` in these domains,
+        and then transporting their predictions back to `dataset_star`.
+        :param models: iterable of models.
+        :param datasets: iterable of datasets corresponding to `models`. Must be of
+            same length.
+        :param dataset_star: This is the domain the model will be used on.
+        :param plan: Optional transport plan. If given, permutes all datasets indexed
+            by `plan_indices` according to the plan.
+        :param plan_indices: Optional indices of datasets to be permuted by `plan`.
+        :param permute_star: If True, also permutes `dataset_star` along the `plan`.
+        :param eta: Hyperparameter controlling the tradeoff between a feature- and a
+            label-based loss in transporting samples.
+        """
         super(MergeNN, self).__init__()
-        self.nb_samples = plan.shape[0]
-        self.models = (model_1, model_2)
-        self.dataset_star = dataset_star
+        assert len(models) == len(datasets), "Length of `models` and `datasets` must be equal!"
+        self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
 
-        nonzero_indices = torch.nonzero(plan)
-        plan_permutation = nonzero_indices.unbind(1)[1]
-        aligned_dataset_2 = deepcopy(dataset_2)
-        aligned_dataset_2.permute_data(plan_permutation)
-        self.datasets = (dataset_1, aligned_dataset_2)
-        self.label_distances = (
-            compute_label_distances(dataset_1, dataset_star),
-            compute_label_distances(aligned_dataset_2, dataset_star),
-        )
+        if plan is not None:
+            nonzero_indices = torch.nonzero(plan)
+            plan_permutation = nonzero_indices.unbind(1)[1]
+            if plan_indices is not None:
+                datasets = list(datasets)
+                for idx in plan_indices:
+                    dataset = deepcopy(datasets[idx])
+                    dataset.permute_data(plan_permutation)
+                    datasets[idx] = dataset
+                self.datasets = tuple(datasets)
+            else:
+                self.datasets = tuple(datasets)
+            if permute_star:
+                dataset_star = deepcopy(dataset_star)
+                dataset_star.permute_data(plan_permutation)
+                self.dataset_star = dataset_star
+            else:
+                self.dataset_star = dataset_star
+        else:
+            self.dataset_star = dataset_star
+            self.datasets = tuple(datasets)
+
+        # distances between labels within datasets
+        self.label_distances = tuple([
+            compute_label_distances(dataset, dataset)
+            for dataset in self.datasets
+        ])
+
+        # distances between labels across datasets w.r.t. dataset_star
+        self.label_distances_star = tuple([
+            compute_label_distances(dataset_star, dataset)
+            for dataset in self.datasets
+        ])
+
 
     def forward(self, x):
         if x.dim() == 1:
@@ -138,6 +178,7 @@ class MergeNN(nn.Module):
             unmatched_x_transported = [
                 torch.zeros((0, dataset.feature_dim)) for dataset in self.datasets
             ]
+
         # transport the samples to the outer datasets and compute the resp. predictions in those datasets
         if len(match_indices) != 0:
             matched_x_transported = [
@@ -164,9 +205,9 @@ class MergeNN(nn.Module):
 
         # transport the predictions back to dataset_star space and aggregate
         y_star = [
-            self.transport_labels(features, y[0], y[1], dataset, label_distances)
-            for features, y, dataset, label_distances in zip(
-                x_transported, y_projected, self.datasets, self.label_distances
+            self.transport_labels(features, y[0], y[1], dataset, label_distances, label_distances_star)
+            for features, y, dataset, label_distances, label_distances_star in zip(
+                x_transported, y_projected, self.datasets, self.label_distances, self.label_distances_star
             )
         ]
         y = sum(y_star) / len(y_star)
@@ -190,7 +231,7 @@ class MergeNN(nn.Module):
         return normalized_transported_features.T
 
     def transport_labels(
-        self, x, y, y_indices, dataset_from, label_distances, method="all_samples"
+        self, x, y, y_indices, dataset_from, label_distances, label_distances_star, method="all_samples"
     ):
         """
         Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
@@ -198,8 +239,10 @@ class MergeNN(nn.Module):
         :param y: tensor of size k*d_y, where k is the number of labels, and d_y their dimension.
         :param y_indices: indices of the labels amongst all labels of the dataset.
         :param dataset_from: the dataset that the labels `y` live in.
-        :param label_distances: label distance matrix giving pairwise distances between labels across
+        :param label_distances: label distance matrix giving pairwise distances between labels within
             the two datasets.
+        :param label_distances_star: label distance matrix giving pairwise distances between labels across
+            datasets, comparing with labels in dataset_star.
         :param method: defines the method used to compute the transported label. One of 'match_label'
             (in which case only samples with matching labels are considered), 'all_samples' (in which
             case all samples are considered), or 'label_distance' (in which case the distance matrix
@@ -212,41 +255,38 @@ class MergeNN(nn.Module):
             mask = torch.all(
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
-
-            transported_y = self.dataset_star.labels
-            masked_exponentials = (
+            exponentials = (
                 torch.exp(-torch.cdist(dataset_from.features, x) ** 2) * mask
             )
-            weighted_transported_labels = torch.matmul(
-                transported_y.T, masked_exponentials
-            )
-            normalized_transported_labels = (
-                weighted_transported_labels / masked_exponentials.sum(dim=0)
-            ).T
+
         elif method == "all_samples":
 
             # matrix of size len(dataset_from)*len(y), where entries are distances between labels
             label_distances = label_distances[dataset_from.label_indices, :][
                 :, y_indices
             ]
-            print(label_distances.abs().mean())
-            print((torch.cdist(dataset_from.features, x) ** 2).abs().mean())
             exponentials = torch.exp(
                 -torch.cdist(dataset_from.features, x) ** 2 - self.eta * label_distances
             )
-            transported_y = self.dataset_star.labels
-            weighted_transported_labels = torch.matmul(transported_y.T, exponentials)
-            normalized_transported_labels = (
-                weighted_transported_labels / exponentials.sum(dim=0)
-            ).T
 
         elif method == "label_distance":
-            pass
+            label_distances = label_distances_star[self.dataset_star.label_indices, :][:, y_indices]
+            exponentials = torch.exp(
+                -label_distances
+            )
+
         else:
             raise ValueError(
                 f"Method {method} not implemented! "
                 f"Choose one of 'match_label', 'all_samples', or 'label_distance'."
             )
+
+        transported_y = self.dataset_star.labels
+        weighted_transported_labels = torch.matmul(transported_y.T, exponentials)
+        normalized_transported_labels = (
+                weighted_transported_labels / exponentials.sum(dim=0)
+        ).T
+
         return normalized_transported_labels
 
 

@@ -69,12 +69,21 @@ class CustomDataset(Dataset):
 class GMM:
 
     def __init__(
-        self, d=2, N=100, l=2, lambdas=None, mus=None, Sigmas=None, exact_lambdas=False
+        self,
+        d=2,
+        train_N=1000,
+        test_N=500,
+        l=2,
+        lambdas=None,
+        mus=None,
+        Sigmas=None,
+        exact_lambdas=False
     ):
         """
         Class to create Gaussian mixture models. Creates `N` training samples.
         :param d: dimension.
-        :param N: number of training samples.
+        :param train_N: number of training samples.
+        :param test_N: number of test samples.
         :param l: number of components.
         :param lambdas: component coefficients.
         :param mus: component means. Tensor of dimension `(l, d)`, defaults to random means.
@@ -83,7 +92,8 @@ class GMM:
             draws them probabilistically.
         """
         self.d = d
-        self.N = N
+        self.train_N = train_N
+        self.test_N = test_N
         self.l = l
         self.exact_lambdas = exact_lambdas
         if lambdas == None:
@@ -101,7 +111,8 @@ class GMM:
             MultivariateNormal(mus[i].to(device), Sigmas[i].to(device))
             for i in range(l)
         ]
-        self.train_samples = self.sample(N)
+        self.train_samples = self.sample(train_N)
+        self.test_samples = self.sample(test_N)
 
     def sample(self, n):
         """
@@ -220,6 +231,7 @@ class InterpolGMMs:
             last dataset are aligned. Do NOT use if low_dim_labels == True.
         """
         self.datasets = []
+        self.test_datasets = []
         self.gmms = []
         if gmm_kwargs1:
             self.gmms.append(GMM(**gmm_kwargs1))
@@ -229,15 +241,23 @@ class InterpolGMMs:
             self.gmms.append(GMM(**gmm_kwargs2))
         else:
             self.gmms.append(GMM())
-        mu = torch.ones(self.gmms[0].N) / self.gmms[0].N
-        nu = torch.ones(self.gmms[1].N) / self.gmms[1].N
+        mu = torch.ones(self.gmms[0].train_N) / self.gmms[0].train_N
+        nu = torch.ones(self.gmms[1].train_N) / self.gmms[1].train_N
+        test_mu = torch.ones(self.gmms[0].test_N) / self.gmms[0].test_N
+        test_nu = torch.ones(self.gmms[1].test_N) / self.gmms[1].test_N
         assert len(mu) == len(nu)
-        n_samples = self.gmms[0].N
+        assert len(test_mu) == len(test_nu)
+        n_samples = self.gmms[0].train_N
         cost = (
             torch.cdist(self.gmms[0].train_samples[0], self.gmms[1].train_samples[0])
             ** 2
         )
+        test_cost = (
+            torch.cdist(self.gmms[0].test_samples[0], self.gmms[1].test_samples[0])
+            ** 2
+        )
         T = ot.emd(mu, nu, cost)
+        test_T = ot.emd(test_mu, test_nu, test_cost)
         self.plan = T
         self.label_dim = sum(gmm.l for gmm in self.gmms)
         l_counter = 0
@@ -249,22 +269,40 @@ class InterpolGMMs:
                     embed_labels(self.label_dim, gmm.train_samples[1], l_counter),
                 )
             )
+            self.test_datasets.append(
+                CustomDataset(
+                    gmm.test_samples[0],
+                    embed_labels(self.label_dim, gmm.test_samples[1], l_counter),
+                )
+            )
             l_counter += gmm.l
         non_zero_indices = torch.nonzero(T)
+        non_zero_test = torch.nonzero(test_T)
         assert len(non_zero_indices) == len(mu)
+        assert len(non_zero_test) == len(test_mu)
         row_indices, col_indices = non_zero_indices.unbind(1)
+        rows_test, cols_test = non_zero_test.unbind(1)
         self.row_indices = row_indices
         assert all(row_indices == torch.tensor([i for i in range(len(mu))]))
+        assert all(rows_test == torch.tensor([i for i in range(len(test_mu))]))
         self.forward_indices = col_indices  # mapping indices of T
         self.inv_indices = col_indices.sort()[1]  # mapping indices of T inverse
+
         x1_features = self.gmms[0].train_samples[0][row_indices]
         x2_features = self.gmms[1].train_samples[0][col_indices]
         x1_labels = self.gmms[0].train_samples[1][row_indices]
         x2_labels = self.gmms[1].train_samples[1][col_indices]
         label_matrix = torch.eye(self.gmms[0].l + self.gmms[1].l)
+
+        x1_features_test = self.gmms[0].test_samples[0][rows_test]
+        x2_features_test = self.gmms[1].test_samples[0][cols_test]
+        x1_labels_test = self.gmms[0].test_samples[1][rows_test]
+        x2_labels_test = self.gmms[1].test_samples[1][cols_test]
+
         for i in range(nb_interpol - 2):
             t = (i + 1) / (nb_interpol - 1)
             samples = (1 - t) * x1_features + t * x2_features
+            test_samples = (1 - t) * x1_features_test + t * x2_features_test
             assert len(samples) == n_samples
             labels = embed_labels(
                 self.label_dim,
@@ -274,6 +312,14 @@ class InterpolGMMs:
                 one_hot_matrix=label_matrix,
             )
             self.datasets.insert(-1, CustomDataset(samples, labels))
+            test_labels = embed_labels(
+                self.label_dim,
+                x1_labels_test,
+                labels_2=x2_labels_test,
+                t=t,
+                one_hot_matrix=label_matrix,
+            )
+            self.test_datasets.insert(-1, CustomDataset(test_samples, test_labels))
 
         if low_dim_labels:
             for i in [0, -1]:
@@ -282,52 +328,62 @@ class InterpolGMMs:
                     self.gmms[i].l,
                     self.gmms[i].train_samples[1],
                 )
+                self.test_datasets[i].high_dim_labels = self.test_datasets[i].labels
+                self.test_datasets[i].labels = embed_labels(
+                    self.gmms[i].l,
+                    self.gmms[i].test_samples[1],
+                )
 
         if hard_labels:
             assert (
                 low_dim_labels == False
             ), "can't use hard_labels alongside soft_dim_labels!"
             soft_label_dim = self.datasets[0].label_dim
-            for dataset in self.datasets:
-                assert (
-                    dataset.num_unique_labels == soft_label_dim // 2
-                ), "number of labels incorrect"
-                compressed_labels = (
-                    dataset.labels[:, :soft_label_dim // 2]
-                    + dataset._labels[:, soft_label_dim // 2:]
-                )
-
-                # in this case, the labels of the interpolated datasets can be chosen to align with the labels of the
-                # outer datasets, because the outer datasets align
-                if len(compressed_labels) == soft_label_dim and torch.all(
-                    torch.unique(compressed_labels) == torch.tensor([0.0, 1.0])
-                ):
-                    dataset.labels = compressed_labels
-
-                # otherwise, give randomly allocated hard labels
-                else:
-                    one_hots = torch.eye(soft_label_dim // 2)[
-                        torch.randperm(soft_label_dim // 2)
-                    ]
-                    _, indices = torch.unique(
-                        dataset.labels, dim=0, return_inverse=True
+            for datasets in self.datasets, self.test_datasets:
+                for dataset in datasets:
+                    assert (
+                        dataset.num_unique_labels == soft_label_dim // 2
+                    ), "number of labels incorrect"
+                    compressed_labels = (
+                        dataset.labels[:, :soft_label_dim // 2]
+                        + dataset._labels[:, soft_label_dim // 2:]
                     )
-                    dataset.labels = one_hots[indices]
+
+                    # in this case, the labels of the interpolated datasets can be chosen to align with the labels of the
+                    # outer datasets, because the outer datasets align
+                    if len(compressed_labels) == soft_label_dim and torch.all(
+                        torch.unique(compressed_labels) == torch.tensor([0.0, 1.0])
+                    ):
+                        dataset.labels = compressed_labels
+
+                    # otherwise, give randomly allocated hard labels
+                    else:
+                        one_hots = torch.eye(soft_label_dim // 2)[
+                            torch.randperm(soft_label_dim // 2)
+                        ]
+                        _, indices = torch.unique(
+                            dataset.labels, dim=0, return_inverse=True
+                        )
+                        dataset.labels = one_hots[indices]
 
             self.label_dim = soft_label_dim // 2
 
-    def plot_datasets(self):
+    def plot_datasets(self, datasets=None):
         """
         Creates plots for all datasets.
+        :param datasets: if None, defaults to the train datasets. The test datasets
+            can be passed to plot those instead.
         :return: None.
         """
+        if datasets is None:
+            datasets = self.datasets
         datasets = [
             (
                 (np.array(dataset.features), np.array(dataset.high_dim_labels))
                 if dataset.high_dim_labels is not None
                 else (np.array(dataset.features), np.array(dataset.labels))
             )
-            for dataset in self.datasets
+            for dataset in datasets
         ]
         k = len(self.datasets)
         d_labels = self.label_dim
