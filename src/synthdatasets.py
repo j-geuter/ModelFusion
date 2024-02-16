@@ -13,8 +13,11 @@ class CustomDataset(Dataset):
     def __init__(self, features, labels):
         self.features = features
         self._labels = labels
-        self.num_samples, self.feature_dim = features.shape
-        _, self.label_dim = labels.shape
+        self.num_samples, self.feature_dim = features.shape[0], features.shape[1:]
+        if labels.dim() == 1:
+            self.label_dim = 1
+        else:
+            self.label_dim = labels.shape[1:]
 
         # Find unique labels and save them as an attribute
         unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True)
