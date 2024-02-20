@@ -8,11 +8,11 @@ from models import *
 def train(
     model,
     dataset,
-    num_epochs=20,
+    num_epochs=1,
     batch_size=128,
-    loss_fn=nn.CrossEntropyLoss(),
-    lr=0.1,
-    opt=optim.SGD,
+    loss_fn=nn.MSELoss(),
+    lr=0.001,
+    opt=optim.Adam,
 ):
     """
     Train a `model` on a `dataset`.
@@ -55,28 +55,35 @@ def test(model, dataset):
     return loss.item()
 
 
-def get_accuracy(model, dataset):
+def get_accuracy(model, dataset, project_labels=True):
     """
     Compute the accuracy of a `model` on a `dataset`. For each datapoint, output the closest label out of all
     labels present in the dataset. Return a value between 0 and 1.
     :param model: model, nn.Module type.
     :param dataset: 2-tuple of Tensors, where the first is `(N,d)` shaped and corresponds to features,
         and the second is `(N,l)` shaped and corresponds to labels.
+    :param project_labels: if True, projects model outputs to the nearest label. Otherwise,
+        uses model output directly as label.
     :return: accuracy as a value between 0 and 1.
     """
     model.eval()
 
-    labels = dataset.unique_labels  # all labels present in the dataset
-    outputs = model(dataset.features)
-    true_labels = get_labels(dataset.labels, labels)
-    predicted_labels = get_labels(outputs, labels)
-    correct_preds = true_labels == predicted_labels
+    labels = dataset.labels  # all labels present in the dataset
+    predicted_labels = model(dataset.features)
+    # true_labels = get_labels(dataset.labels, labels)
+    if project_labels:
+        labels = get_labels(labels, dataset.unique_labels)
+        predicted_labels = get_labels(predicted_labels, dataset.unique_labels)
+    correct_preds = labels == predicted_labels
     accuracy = correct_preds.float().mean()
     return round(accuracy.item(), 2)
 
 
 def get_labels(preds, labels):
-    dists = torch.cdist(preds, labels)
+    if preds.dim() == 1:
+        preds = preds.unsqueeze(1)
+        print('Warning! You probably want to pass `project_labels`=False to `get_accuracy`.')
+    dists = torch.cdist(preds.to(torch.float32), labels.to(torch.float32))
     closest = torch.argmin(dists, dim=1)
     return closest
 

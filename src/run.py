@@ -5,6 +5,8 @@ from fusion import *
 from synthdatasets import *
 from train import *
 
+torch.manual_seed(42)
+
 # gmms = InterpolGMMs(
 #    gmm_kwargs1={'N':1000, 'mus':torch.tensor([[-3.,-3.],[-3.,3.]]),'lambdas':torch.tensor([2.,10.])},
 #    gmm_kwargs2={'l':3,'N':1000,'mus':torch.tensor([[1.,4.],[0.,0.],[0.,-3.]])}
@@ -43,7 +45,7 @@ BIAS = True
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
 D_OUT = sum([gmm.l for gmm in gmms.gmms])
-ITERS = 3
+ITERS = 1
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {"models": [], "weights": []} for j in range(NUM_DATASETS)}
@@ -117,8 +119,8 @@ print(
     f'Parameter counts: {[data[i]["models"][0].par_number for i in range(NUM_DATASETS)]}'
 )
 
-mergedNNs = [
-    MergeNN(
+TransportNNs = [
+    TransportNN(
         [data[2]["models"][i]],#data[2]["models"][i]
         [gmms.datasets[2]],#gmms.datasets[2]
         gmms.datasets[0],
@@ -177,7 +179,7 @@ print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")
 
 print("MergedNN on 2:")
 accs = []
-for mergedNN in mergedNNs:
+for mergedNN in TransportNNs:
     accs.append(get_accuracy(mergedNN, gmms.test_datasets[0]))
 avg = sum(accs) / len(accs)
 print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")

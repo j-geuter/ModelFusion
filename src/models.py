@@ -80,7 +80,7 @@ class SimpleNN(nn.Module):
             vector_index += num_elements
 
 
-class MergeNN(nn.Module):
+class TransportNN(nn.Module):
     def __init__(
         self, models, datasets, dataset_star, plan=None, plan_indices=None, permute_star=False, eta=1
     ):
@@ -100,7 +100,7 @@ class MergeNN(nn.Module):
         :param eta: Hyperparameter controlling the tradeoff between a feature- and a
             label-based loss in transporting samples.
         """
-        super(MergeNN, self).__init__()
+        super(TransportNN, self).__init__()
         assert len(models) == len(datasets), "Length of `models` and `datasets` must be equal!"
         self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
@@ -186,7 +186,7 @@ class MergeNN(nn.Module):
             ]
         else:
             matched_x_transported = [
-                torch.zeros((0, dataset.feature_dim)) for dataset in self.datasets
+                torch.zeros((0,)+dataset.feature_dim) for dataset in self.datasets
             ]
 
         x_transported = [torch.zeros(x.shape) for _ in self.datasets]
@@ -221,7 +221,10 @@ class MergeNN(nn.Module):
         :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
         """
         transported_features = dataset_to.features
-        exponentials = torch.exp(-torch.cdist(self.dataset_star.features, x) ** 2)
+        exponentials = torch.exp(-torch.cdist(
+            self.dataset_star.features.view(self.dataset_star.features.shape[0], -1),
+            x.view(x.shape[0], -1)
+        ) ** 2)
         weighted_transported_features = torch.matmul(
             transported_features.T, exponentials
         )
@@ -256,7 +259,10 @@ class MergeNN(nn.Module):
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
             exponentials = (
-                torch.exp(-torch.cdist(dataset_from.features, x) ** 2) * mask
+                torch.exp(-torch.cdist(
+                    dataset_from.features.view(dataset_from.features.shape[0], -1),
+                    x.view(x.shape[0], -1)
+                ) ** 2) * mask
             )
 
         elif method == "all_samples":
@@ -266,7 +272,10 @@ class MergeNN(nn.Module):
                 :, y_indices
             ]
             exponentials = torch.exp(
-                -torch.cdist(dataset_from.features, x) ** 2 - self.eta * label_distances
+                -torch.cdist(
+                    dataset_from.features.view(dataset_from.features.shape[0], -1),
+                    x.view(x.shape[0], -1)
+                ) ** 2 - self.eta * label_distances
             )
 
         elif method == "label_distance":
@@ -307,7 +316,10 @@ def compute_label_distances(dataset_1, dataset_2):
             features_2 = dataset_2.get_samples_by_label(labels_2[j])[0]
             mu = torch.ones(len(features_1)) / len(features_1)
             nu = torch.ones(len(features_2)) / len(features_2)
-            cost = torch.cdist(features_1, features_2) ** 2
+            cost = torch.cdist(
+                features_1.view(features_1.shape[0], -1),
+                features_2.view(features_2.shape[0], -1)
+            ) ** 2
             transport_cost = ot.emd2(mu, nu, cost)
             label_distances[i][j] = transport_cost
     return label_distances
@@ -369,3 +381,44 @@ def pad_weights(net, layer_sizes, pad_from="top"):
         bias=net.bias,
         temperature=net.temperature,
     )
+
+
+class SimpleCNN(nn.Module):
+    def __init__(self, num_classes=10, location=None):
+        super(SimpleCNN, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+        self.par_number = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        if location is not None:
+            self.load_model(location)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+    def save_model(self, location):
+        """
+        Save the model to `location`.
+        """
+        torch.save(self.state_dict(), location)
+        print(f"Model saved to {location}")
+
+    def load_model(self, location):
+        """
+        Load a model from `location`.
+        """
+        self.load_state_dict(torch.load(location))
+        print(f"Model loaded from {location}")
