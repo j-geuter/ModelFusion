@@ -184,13 +184,8 @@ print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")
 
 print("MergedNN from 1 to 2:")
 accs = []
-<<<<<<< HEAD
 for mergedNN in TransportNNs:
     accs.append(get_accuracy(mergedNN, gmms.test_datasets[0]))
-=======
-for mergedNN in mergedNNs:
-    accs.append(get_accuracy(mergedNN, gmms.test_datasets[1]))
->>>>>>> main
 avg = sum(accs) / len(accs)
 print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")
 
