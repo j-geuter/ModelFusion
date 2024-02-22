@@ -82,7 +82,9 @@ def get_accuracy(model, dataset, project_labels=True):
 def get_labels(preds, labels):
     if preds.dim() == 1:
         preds = preds.unsqueeze(1)
-        print('Warning! You probably want to pass `project_labels`=False to `get_accuracy`.')
+        print(
+            "Warning! You probably want to pass `project_labels`=False to `get_accuracy`."
+        )
     dists = torch.cdist(preds.to(torch.float32), labels.to(torch.float32))
     closest = torch.argmin(dists, dim=1)
     return closest

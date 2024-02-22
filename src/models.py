@@ -82,7 +82,15 @@ class SimpleNN(nn.Module):
 
 class TransportNN(nn.Module):
     def __init__(
-        self, models, datasets, dataset_star, plan=None, plan_indices=None, permute_star=False, eta=1
+        self,
+        models,
+        datasets,
+        dataset_star,
+        plan=None,
+        plan_indices=None,
+        permute_star=False,
+        eta=1,
+        aggregate_method="all_features"
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
@@ -99,12 +107,18 @@ class TransportNN(nn.Module):
         :param permute_star: If True, also permutes `dataset_star` along the `plan`.
         :param eta: Hyperparameter controlling the tradeoff between a feature- and a
             label-based loss in transporting samples.
+        :param aggregate_method: Defines the method used to compute the transported label. One of 'match_label'
+            (in which case only samples with matching labels are considered), 'all_samples' (in which
+            case all samples are considered), 'all_features' (also averages over all samples, but only
+            taking feature distances into account, ignoring label distances), 'all_labels' (also averages over
+            all samples, but only considering label distances, ignoring features), or 'label_distance' (in
+            which case the distance matrix between labels from the source dataset to dataset_star is used for transport).
         """
         super(TransportNN, self).__init__()
         assert len(models) == len(datasets), "Length of `models` and `datasets` must be equal!"
         self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
-
+        self.method = aggregate_method
         if plan is not None:
             nonzero_indices = torch.nonzero(plan)
             plan_permutation = nonzero_indices.unbind(1)[1]
@@ -128,17 +142,17 @@ class TransportNN(nn.Module):
             self.datasets = tuple(datasets)
 
         # distances between labels within datasets
-        self.label_distances = tuple([
-            compute_label_distances(dataset, dataset)
-            for dataset in self.datasets
-        ])
+        self.label_distances = tuple(
+            [compute_label_distances(dataset, dataset) for dataset in self.datasets]
+        )
 
         # distances between labels across datasets w.r.t. dataset_star
-        self.label_distances_star = tuple([
-            compute_label_distances(dataset_star, dataset)
-            for dataset in self.datasets
-        ])
-
+        self.label_distances_star = tuple(
+            [
+                compute_label_distances(dataset_star, dataset)
+                for dataset in self.datasets
+            ]
+        )
 
     def forward(self, x):
         if x.dim() == 1:
@@ -210,9 +224,15 @@ class TransportNN(nn.Module):
 
         # transport the predictions back to dataset_star space and aggregate
         y_star = [
-            self.transport_labels(features, y[0], y[1], dataset, label_distances, label_distances_star)
+            self.transport_labels(
+                features, y[0], y[1], dataset, label_distances, label_distances_star
+            )
             for features, y, dataset, label_distances, label_distances_star in zip(
-                x_transported, y_projected, self.datasets, self.label_distances, self.label_distances_star
+                x_transported,
+                y_projected,
+                self.datasets,
+                self.label_distances,
+                self.label_distances_star,
             )
         ]
         y = sum(y_star) / len(y_star)
@@ -239,7 +259,13 @@ class TransportNN(nn.Module):
         return normalized_transported_features.T
 
     def transport_labels(
-        self, x, y, y_indices, dataset_from, label_distances, label_distances_star, method="all_samples"
+        self,
+        x,
+        y,
+        y_indices,
+        dataset_from,
+        label_distances,
+        label_distances_star,
     ):
         """
         Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
@@ -251,14 +277,9 @@ class TransportNN(nn.Module):
             the two datasets.
         :param label_distances_star: label distance matrix giving pairwise distances between labels across
             datasets, comparing with labels in dataset_star.
-        :param method: defines the method used to compute the transported label. One of 'match_label'
-            (in which case only samples with matching labels are considered), 'all_samples' (in which
-            case all samples are considered), or 'label_distance' (in which case the distance matrix
-            between labels is used for transport).
         :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
         """
-        if method == "match_label":
-
+        if self.method == "match_label":
             # define mask with (i,j)^th entry 1 iff the i^th label in the dataset is equal to the j^th label in y
             mask = torch.all(
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
@@ -270,8 +291,7 @@ class TransportNN(nn.Module):
                 ) ** 2) * mask
             )
 
-        elif method == "all_samples":
-
+        elif self.method == "all_samples":
             # matrix of size len(dataset_from)*len(y), where entries are distances between labels
             label_distances = label_distances[dataset_from.label_indices, :][
                 :, y_indices
@@ -283,22 +303,33 @@ class TransportNN(nn.Module):
                 ) ** 2 - self.eta * label_distances
             )
 
-        elif method == "label_distance":
-            label_distances = label_distances_star[self.dataset_star.label_indices, :][:, y_indices]
+        elif self.method == "all_features":
             exponentials = torch.exp(
-                -label_distances
+                -torch.cdist(dataset_from.features.view(dataset_from.features.shape[0], -1), x.view(x.shape[0], -1)) ** 2
             )
+
+        elif self.method == "all_labels":
+            label_distances = label_distances[dataset_from.label_indices, :][
+                              :, y_indices
+                              ]
+            exponentials = torch.exp(-label_distances)
+
+        elif self.method == "label_distance":
+            label_distances = label_distances_star[self.dataset_star.label_indices, :][
+                :, y_indices
+            ]
+            exponentials = torch.exp(-label_distances)
 
         else:
             raise ValueError(
-                f"Method {method} not implemented! "
-                f"Choose one of 'match_label', 'all_samples', or 'label_distance'."
+                f"Method {self.method} not implemented! "
+                f"Choose one of 'match_label', 'all_samples', 'all_features', or 'label_distance'."
             )
 
         transported_y = self.dataset_star.labels if self.dataset_star.high_dim_labels is None else self.dataset_star.high_dim_labels
         weighted_transported_labels = torch.matmul(transported_y.T, exponentials)
         normalized_transported_labels = (
-                weighted_transported_labels / exponentials.sum(dim=0)
+            weighted_transported_labels / exponentials.sum(dim=0)
         ).T
 
         return normalized_transported_labels

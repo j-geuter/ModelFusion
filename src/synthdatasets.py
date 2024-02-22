@@ -2,8 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ot
 import torch
-from torch.distributions import (Categorical, MixtureSameFamily,
-                                 MultivariateNormal)
+from torch.distributions import Categorical, MixtureSameFamily, MultivariateNormal
 from torch.utils.data import Dataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -85,7 +84,7 @@ class GMM:
         lambdas=None,
         mus=None,
         Sigmas=None,
-        exact_lambdas=False
+        exact_lambdas=False,
     ):
         """
         Class to create Gaussian mixture models. Creates `N` training samples.
@@ -261,8 +260,7 @@ class InterpolGMMs:
             ** 2
         )
         test_cost = (
-            torch.cdist(self.gmms[0].test_samples[0], self.gmms[1].test_samples[0])
-            ** 2
+            torch.cdist(self.gmms[0].test_samples[0], self.gmms[1].test_samples[0]) ** 2
         )
         T = ot.emd(mu, nu, cost)
         test_T = ot.emd(test_mu, test_nu, test_cost)
@@ -353,8 +351,8 @@ class InterpolGMMs:
                         dataset.num_unique_labels == soft_label_dim // 2
                     ), "number of labels incorrect"
                     compressed_labels = (
-                        dataset.labels[:, :soft_label_dim // 2]
-                        + dataset._labels[:, soft_label_dim // 2:]
+                        dataset.labels[:, : soft_label_dim // 2]
+                        + dataset._labels[:, soft_label_dim // 2 :]
                     )
 
                     # in this case, the labels of the interpolated datasets can be chosen to align with the labels of the
