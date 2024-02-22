@@ -144,9 +144,14 @@ class TransportNN(nn.Module):
         if x.dim() == 1:
             x = x.unsqueeze(0)
 
+        # reshape x
+        initial_shape = x.shape
+        x = x.squeeze()
+        x = x.view(x.shape[0], -1)
+
         # this is a k*2-tensor, where each row (i,j) means that the i-sample in x is equal to the j-sample in dataset_star
         matches = (
-            torch.eq(x.unsqueeze(1), self.dataset_star.features.unsqueeze(0))
+            torch.eq(x.unsqueeze(1), self.dataset_star.features.view(self.dataset_star.features.shape[0], -1).unsqueeze(0))
             .all(dim=2)
             .nonzero()
         )
@@ -176,7 +181,7 @@ class TransportNN(nn.Module):
             ]
         else:
             unmatched_x_transported = [
-                torch.zeros((0, dataset.feature_dim)) for dataset in self.datasets
+                torch.zeros((0,) + dataset.flattened_feature_dim) for dataset in self.datasets
             ]
 
         # transport the samples to the outer datasets and compute the resp. predictions in those datasets
@@ -186,7 +191,7 @@ class TransportNN(nn.Module):
             ]
         else:
             matched_x_transported = [
-                torch.zeros((0,)+dataset.feature_dim) for dataset in self.datasets
+                torch.zeros((0,)+dataset.flattened_feature_dim) for dataset in self.datasets
             ]
 
         x_transported = [torch.zeros(x.shape) for _ in self.datasets]
@@ -196,10 +201,10 @@ class TransportNN(nn.Module):
             item[unmatched_sample_indices] = x_unmatched
             item[match_samples] = x_matched
         y_transported = [
-            model(samples) for model, samples in zip(self.models, x_transported)
+            model(samples.view(torch.Size([samples.shape[0]])+initial_shape[1:])) for model, samples in zip(self.models, x_transported)
         ]
         y_projected = [
-            project_labels(y, dataset.unique_labels)
+            project_labels(y, dataset.unique_labels, dataset.high_dim_labels)
             for y, dataset in zip(y_transported, self.datasets)
         ]
 
@@ -220,7 +225,7 @@ class TransportNN(nn.Module):
         :param dataset_to: the dataset that the features are mapped to.
         :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
         """
-        transported_features = dataset_to.features
+        transported_features = dataset_to.features.view(dataset_to.features.shape[0], -1)
         exponentials = torch.exp(-torch.cdist(
             self.dataset_star.features.view(self.dataset_star.features.shape[0], -1),
             x.view(x.shape[0], -1)
@@ -290,7 +295,7 @@ class TransportNN(nn.Module):
                 f"Choose one of 'match_label', 'all_samples', or 'label_distance'."
             )
 
-        transported_y = self.dataset_star.labels
+        transported_y = self.dataset_star.labels if self.dataset_star.high_dim_labels is None else self.dataset_star.high_dim_labels
         weighted_transported_labels = torch.matmul(transported_y.T, exponentials)
         normalized_transported_labels = (
                 weighted_transported_labels / exponentials.sum(dim=0)
@@ -325,10 +330,18 @@ def compute_label_distances(dataset_1, dataset_2):
     return label_distances
 
 
-def project_labels(preds, labels):
-    dists = torch.cdist(preds, labels)
-    closest = torch.argmin(dists, dim=1)
-    return labels[closest], closest
+def project_labels(preds, labels, high_dim_labels):
+
+    # if predictions and labels have the same dimension
+    if preds[0].shape == labels[0].shape:
+        dists = torch.cdist(preds, labels)
+        closest = torch.argmin(dists, dim=1)
+        return labels[closest], closest
+
+    # if they do not have the same dimension, i.e. predictions are high-dimensional, labels are numbers
+    else:
+        closest = torch.argmax(preds, dim=1)
+        return high_dim_labels[closest], closest
 
 
 def pad_weights(net, layer_sizes, pad_from="top"):

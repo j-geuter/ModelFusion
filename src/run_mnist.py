@@ -10,7 +10,7 @@ from train_mnist import test_accuracy
 
 TRAIN_DATASET = 'mnist' # this is the dataset on which a model is trained; either `mnist` or `fashion`
 BATCH_SIZE = 64
-NUM_SAMPLES = 10000 # number of training samples used in the transport plan
+NUM_SAMPLES = 100 # number of training samples used in the transport plan
 assert NUM_SAMPLES <= 60000
 
 torch.manual_seed(42)

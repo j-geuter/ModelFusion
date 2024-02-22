@@ -10,12 +10,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class CustomDataset(Dataset):
-    def __init__(self, features, labels):
+    def __init__(self, features, labels, low_dim_labels=True):
         self.features = features
         if labels.dim() == 1:
             labels = labels.unsqueeze(1)
         self._labels = labels
         self.num_samples, self.feature_dim = features.shape[0], features.shape[1:]
+        self.flattened_feature_dim = features.view(self.num_samples, -1).shape[1:]
         self.label_dim = labels.shape[1:]
 
         # Find unique labels and save them as an attribute
@@ -23,7 +24,12 @@ class CustomDataset(Dataset):
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
-        self.high_dim_labels = None
+        if low_dim_labels:
+            self.high_dim_unique_labels = torch.eye(self.num_unique_labels)
+            self.high_dim_labels = self.high_dim_unique_labels[self._labels.squeeze()]
+        else:
+            self.high_dim_labels = None
+            self.high_dim_unique_labels = None
         self.label_indices = (
             torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
             .to(int)
