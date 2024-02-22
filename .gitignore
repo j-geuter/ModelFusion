@@ -3,3 +3,4 @@ __pycache__/*
 .idea/*
 venv/*
 src/__pycache__/*
+src/data/*

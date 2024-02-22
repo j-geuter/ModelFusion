@@ -23,7 +23,10 @@ gmms = InterpolGMMs(
         "l": 6,
         "train_N": 2000,
         "test_N": 1000,
-        "mus": 5 * torch.tensor([[0.0, 2.0], [1.0, 1.0], [2.0, 2.0], [4.0, 4.0], [4, 2], [3, 4]]),
+        "mus": 5
+        * torch.tensor(
+            [[0.0, 2.0], [1.0, 1.0], [2.0, 2.0], [4.0, 4.0], [4, 2], [3, 4]]
+        ),
         "lambdas": torch.tensor([10.0, 2.0, 2.0, 2.0, 5, 2]),
     },
     low_dim_labels=True,
@@ -119,12 +122,12 @@ print(
 
 mergedNNs = [
     MergeNN(
-        [data[2]["models"][i]],#data[2]["models"][i]
-        [gmms.datasets[2]],#gmms.datasets[2]
-        gmms.datasets[0],
+        [data[0]["models"][i]],  # data[2]["models"][i]
+        [gmms.datasets[0]],  # gmms.datasets[2]
+        gmms.datasets[1],
         gmms.plan.T,
-        permute_star=True
-        #(1,)
+        permute_star=False,
+        # (1,)
     )
     for i in range(ITERS)
 ]
@@ -175,10 +178,10 @@ avg = sum(accs) / len(accs)
 print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")
 
 
-print("MergedNN on 2:")
+print("MergedNN from 1 to 2:")
 accs = []
 for mergedNN in mergedNNs:
-    accs.append(get_accuracy(mergedNN, gmms.test_datasets[0]))
+    accs.append(get_accuracy(mergedNN, gmms.test_datasets[1]))
 avg = sum(accs) / len(accs)
 print(f"Accuracies: {accs}, avg. accuracy: {avg}\n")
 
