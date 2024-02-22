@@ -90,6 +90,7 @@ class MergeNN(nn.Module):
         plan_indices=None,
         permute_star=False,
         eta=1,
+        aggregate_method="all_features"
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
@@ -106,6 +107,12 @@ class MergeNN(nn.Module):
         :param permute_star: If True, also permutes `dataset_star` along the `plan`.
         :param eta: Hyperparameter controlling the tradeoff between a feature- and a
             label-based loss in transporting samples.
+        :param aggregate_method: Defines the method used to compute the transported label. One of 'match_label'
+            (in which case only samples with matching labels are considered), 'all_samples' (in which
+            case all samples are considered), 'all_features' (also averages over all samples, but only
+            taking feature distances into account, ignoring label distances), 'all_labels' (also averages over
+            all samples, but only considering label distances, ignoring features), or 'label_distance' (in
+            which case the distance matrix between labels from the source dataset to dataset_star is used for transport).
         """
         super(MergeNN, self).__init__()
         assert len(models) == len(
@@ -113,7 +120,7 @@ class MergeNN(nn.Module):
         ), "Length of `models` and `datasets` must be equal!"
         self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
-
+        self.method = aggregate_method
         if plan is not None:
             nonzero_indices = torch.nonzero(plan)
             plan_permutation = nonzero_indices.unbind(1)[1]
@@ -253,7 +260,6 @@ class MergeNN(nn.Module):
         dataset_from,
         label_distances,
         label_distances_star,
-        method="all_samples",
     ):
         """
         Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
@@ -265,20 +271,16 @@ class MergeNN(nn.Module):
             the two datasets.
         :param label_distances_star: label distance matrix giving pairwise distances between labels across
             datasets, comparing with labels in dataset_star.
-        :param method: defines the method used to compute the transported label. One of 'match_label'
-            (in which case only samples with matching labels are considered), 'all_samples' (in which
-            case all samples are considered), or 'label_distance' (in which case the distance matrix
-            between labels is used for transport).
         :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
         """
-        if method == "match_label":
+        if self.method == "match_label":
             # define mask with (i,j)^th entry 1 iff the i^th label in the dataset is equal to the j^th label in y
             mask = torch.all(
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
             exponentials = torch.exp(-torch.cdist(dataset_from.features, x) ** 2) * mask
 
-        elif method == "all_samples":
+        elif self.method == "all_samples":
             # matrix of size len(dataset_from)*len(y), where entries are distances between labels
             label_distances = label_distances[dataset_from.label_indices, :][
                 :, y_indices
@@ -287,10 +289,16 @@ class MergeNN(nn.Module):
                 -torch.cdist(dataset_from.features, x) ** 2 - self.eta * label_distances
             )
 
-        elif method == "all_features":
+        elif self.method == "all_features":
             exponentials = torch.exp(-torch.cdist(dataset_from.features, x) ** 2)
 
-        elif method == "label_distance":
+        elif self.method == "all_labels":
+            label_distances = label_distances[dataset_from.label_indices, :][
+                              :, y_indices
+                              ]
+            exponentials = torch.exp(-label_distances)
+
+        elif self.method == "label_distance":
             label_distances = label_distances_star[self.dataset_star.label_indices, :][
                 :, y_indices
             ]
@@ -298,8 +306,8 @@ class MergeNN(nn.Module):
 
         else:
             raise ValueError(
-                f"Method {method} not implemented! "
-                f"Choose one of 'match_label', 'all_samples', or 'label_distance'."
+                f"Method {self.method} not implemented! "
+                f"Choose one of 'match_label', 'all_samples', 'all_features', or 'label_distance'."
             )
 
         transported_y = self.dataset_star.labels

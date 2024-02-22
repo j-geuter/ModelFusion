@@ -5,6 +5,8 @@ from fusion import *
 from synthdatasets import *
 from train import *
 
+torch.manual_seed(42)
+
 # gmms = InterpolGMMs(
 #    gmm_kwargs1={'N':1000, 'mus':torch.tensor([[-3.,-3.],[-3.,3.]]),'lambdas':torch.tensor([2.,10.])},
 #    gmm_kwargs2={'l':3,'N':1000,'mus':torch.tensor([[1.,4.],[0.,0.],[0.,-3.]])}
@@ -46,7 +48,8 @@ BIAS = True
 NUM_DATASETS = len(gmms.datasets)
 D_IN = 2
 D_OUT = sum([gmm.l for gmm in gmms.gmms])
-ITERS = 3
+ITERS = 5
+METHOD = "all_samples"
 
 # for each dataset, contains a list with 2-tuples of (model,weight)
 data = {j: {"models": [], "weights": []} for j in range(NUM_DATASETS)}
@@ -127,6 +130,7 @@ mergedNNs = [
         gmms.datasets[1],
         gmms.plan.T,
         permute_star=False,
+        aggregate_method=METHOD,
         # (1,)
     )
     for i in range(ITERS)
