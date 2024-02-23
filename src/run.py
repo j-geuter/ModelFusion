@@ -125,8 +125,8 @@ print(
 
 TransportNNs = [
     TransportNN(
-        [data[2]["models"][i]],#data[2]["models"][i]
-        [gmms.datasets[2]],#gmms.datasets[2]
+        [data[2]["models"][i]],  # data[2]["models"][i]
+        [gmms.datasets[2]],  # gmms.datasets[2]
         gmms.datasets[0],
         gmms.plan.T,
         permute_star=False,
