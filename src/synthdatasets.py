@@ -23,17 +23,19 @@ class CustomDataset(Dataset):
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
-        if low_dim_labels:
-            self.high_dim_unique_labels = torch.eye(self.num_unique_labels)
-            self.high_dim_labels = self.high_dim_unique_labels[self._labels.squeeze()]
-        else:
-            self.high_dim_labels = None
-            self.high_dim_unique_labels = None
         self.label_indices = (
             torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
             .to(int)
             .argmax(dim=1)
         )
+        if (
+            low_dim_labels
+        ):  # this means the labels are low dimensional, and will create high dimensional counterparts
+            self.high_dim_unique_labels = torch.eye(self.num_unique_labels)
+            self.high_dim_labels = self.high_dim_unique_labels[self.label_indices]
+        else:
+            self.high_dim_labels = None
+            self.high_dim_unique_labels = None
 
     def __len__(self):
         return self.num_samples
@@ -317,7 +319,7 @@ class InterpolGMMs:
                 t=t,
                 one_hot_matrix=label_matrix,
             )
-            self.datasets.insert(-1, CustomDataset(samples, labels))
+            self.datasets.insert(-1, CustomDataset(samples, labels, low_dim_labels=False))
             test_labels = embed_labels(
                 self.label_dim,
                 x1_labels_test,
@@ -325,7 +327,7 @@ class InterpolGMMs:
                 t=t,
                 one_hot_matrix=label_matrix,
             )
-            self.test_datasets.insert(-1, CustomDataset(test_samples, test_labels))
+            self.test_datasets.insert(-1, CustomDataset(test_samples, test_labels, low_dim_labels=False))
 
         if low_dim_labels:
             for i in [0, -1]:

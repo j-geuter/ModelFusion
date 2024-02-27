@@ -4,6 +4,7 @@ import torch.optim as optim
 from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from models import SimpleCNN
 
@@ -28,16 +29,22 @@ def train(model, train_loader, test_loader, num_epochs=2):
     print("Training finished.")
 
 
-def test_accuracy(model, data_loader):
+def test_accuracy(model, data_loader, max_samples=torch.inf):
     model.eval()
     total_correct = 0
     total_samples = 0
+    if max_samples < torch.inf:
+        total_iters = max_samples // data_loader.batch_size
+    else:
+        total_iters = len(data_loader)
     with torch.no_grad():
-        for images, labels in data_loader:
+        for images, labels in tqdm(data_loader, total=total_iters):
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
             total_correct += (predicted == labels).sum().item()
             total_samples += labels.size(0)
+            if total_samples >= max_samples:
+                break
 
     accuracy = total_correct / total_samples
     return accuracy

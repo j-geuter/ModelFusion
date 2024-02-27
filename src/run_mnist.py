@@ -8,9 +8,9 @@ from synthdatasets import CustomDataset
 from models import SimpleCNN, TransportNN
 from train_mnist import test_accuracy
 
-TRAIN_DATASET = "mnist"  # this is the dataset on which a model is trained; either `mnist` or `fashion`
+TRAIN_DATASET = "fashion"  # this is the dataset on which a model is trained; either `mnist` or `fashion`
 BATCH_SIZE = 64
-NUM_SAMPLES = 100  # number of training samples used in the transport plan
+NUM_SAMPLES = 10000  # number of training samples used in the transport plan
 assert NUM_SAMPLES <= 60000
 
 torch.manual_seed(42)
@@ -69,6 +69,8 @@ if TRAIN_DATASET == "mnist":
     # creating a train_loader as well but just for testing purposes
     train_loader = DataLoader(mnist_train, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(mnist_test, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader_star = DataLoader(fashion_test, batch_size=BATCH_SIZE, shuffle=False)
+
 
 elif TRAIN_DATASET == "fashion":
     train_datasets = [fashion_train_dataset, mnist_train_dataset]
@@ -78,6 +80,8 @@ elif TRAIN_DATASET == "fashion":
     # creating a train_loader as well but just for testing purposes
     train_loader = DataLoader(fashion_train, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(fashion_test, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader_star = DataLoader(mnist_test, batch_size=BATCH_SIZE, shuffle=False)
+
 else:
     raise ValueError("TRAIN_DATASET must be either `mnist` or `fashion`.")
 
@@ -103,7 +107,7 @@ assert all(rows == torch.tensor([i for i in range(len(mu))]))
 train_datasets[1].permute_data(permutation)
 
 transportNN = TransportNN([model], [train_datasets[0]], train_datasets[1])
-train_acc = test_accuracy(transportNN, train_loader)
-print(f"TransportNN accuracy on train set: {train_acc}")
-test_acc = test_accuracy(transportNN, test_loader)
+# train_acc = test_accuracy(transportNN, train_loader, max_samples=2000)
+# print(f"TransportNN accuracy on train set: {train_acc}")
+test_acc = test_accuracy(transportNN, test_loader_star, max_samples=2000)
 print(f"TransportNN accuracy on test set: {test_acc}")

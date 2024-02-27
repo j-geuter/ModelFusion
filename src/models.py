@@ -91,6 +91,7 @@ class TransportNN(nn.Module):
         permute_star=False,
         eta=1,
         aggregate_method="all_features",
+        temperature = 10
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
@@ -113,6 +114,8 @@ class TransportNN(nn.Module):
             taking feature distances into account, ignoring label distances), 'all_labels' (also averages over
             all samples, but only considering label distances, ignoring features), or 'label_distance' (in
             which case the distance matrix between labels from the source dataset to dataset_star is used for transport).
+        :param temperature: temperature for exponential smoothing of feature and label transport. Higher temperature
+            equals less entropy, while lower temperature means more entropy.
         """
         super(TransportNN, self).__init__()
         assert len(models) == len(
@@ -121,6 +124,7 @@ class TransportNN(nn.Module):
         self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
         self.method = aggregate_method
+        self.temperature = temperature
         if plan is not None:
             nonzero_indices = torch.nonzero(plan)
             plan_permutation = nonzero_indices.unbind(1)[1]
@@ -162,7 +166,7 @@ class TransportNN(nn.Module):
 
         # reshape x
         initial_shape = x.shape
-        x = x.squeeze()
+        x = x.squeeze(1)
         x = x.view(x.shape[0], -1)
 
         # this is a k*2-tensor, where each row (i,j) means that the i-sample in x is equal to the j-sample in dataset_star
@@ -258,15 +262,14 @@ class TransportNN(nn.Module):
         transported_features = dataset_to.features.view(
             dataset_to.features.shape[0], -1
         )
-        exponentials = torch.exp(
-            -torch.cdist(
+        dists = torch.cdist(
                 self.dataset_star.features.view(
                     self.dataset_star.features.shape[0], -1
                 ),
                 x.view(x.shape[0], -1),
-            )
-            ** 2
-        )
+            ) ** 2
+        dists /= dists.mean(0) # normalizes distances to avoid NaNs
+        exponentials = torch.exp(-self.temperature * dists)
         weighted_transported_features = torch.matmul(
             transported_features.T, exponentials
         )
