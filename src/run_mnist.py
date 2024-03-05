@@ -3,12 +3,13 @@ from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import ot
+from sinkhorn import sinkhorn
 
 from synthdatasets import CustomDataset
 from models import SimpleCNN, TransportNN
 from train_mnist import test_accuracy
 
-TRAIN_DATASET = "fashion"  # this is the dataset on which a model is trained; either `mnist` or `fashion`
+TRAIN_DATASET = "mnist"  # this is the dataset on which a model is trained; either `mnist` or `fashion`
 BATCH_SIZE = 64
 NUM_SAMPLES = 10000  # number of training samples used in the transport plan
 assert NUM_SAMPLES <= 60000
@@ -99,11 +100,11 @@ cost = (
     ** 2
 )
 
-T = ot.emd(mu, nu, cost, numItermax=1000000)
+cost /= cost.max()
+cost = torch.maximum(cost, torch.tensor([1e-4]))
+T = sinkhorn(mu, nu, cost, 0.01, 10000, normThr=1e-7, show_progress_bar=True, log=True)['plan']
 nonzero_indices = torch.nonzero(T)
-assert len(nonzero_indices) == len(mu)
 rows, permutation = nonzero_indices.unbind(1)
-assert all(rows == torch.tensor([i for i in range(len(mu))]))
 train_datasets[1].permute_data(permutation)
 
 transportNN = TransportNN([model], [train_datasets[0]], train_datasets[1])

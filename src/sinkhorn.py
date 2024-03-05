@@ -1,5 +1,6 @@
 import torch
 from logger import logging
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -15,9 +16,10 @@ def sinkhorn(
     mcvThr=0,
     normThr=0,
     tens_type=torch.float32,
-    verbose=False,
+    verbose=True,
     min_start=None,
     max_start=None,
+    show_progress_bar=False
 ):
     """
     Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
@@ -34,6 +36,7 @@ def sinkhorn(
     :param verbose: if False, turns off all info and warnings.
     :param min_start: if given, sets all entries in the starting vector smaller than `min_start` equal to `min_start`.
     :param max_start: if given, sets all entries in the starting vector larger than `max_start` equal to `max_start`.
+    :param show_progress_bar: if True, shows a progress bar.
     :return: If log==False: transport costs. Else: A dict with keys 'cost' (transport costs), 'plan' (transport plans), 'iterations' (number of iterations), 'u' (first dual potential, NOT the scaling vector), 'v' (second dual potential, NOT the scaling vector), 'average marginal constraint violation'.
     """
     mu = d1.clone().to(device)
@@ -63,7 +66,8 @@ def sinkhorn(
     K = torch.exp(-C / eps).to(tens_type).to(device)
     v = start.clone()
     it = max_iter
-    for i in range(max_iter):
+    iterable = range(max_iter) if not show_progress_bar else tqdm(range(max_iter))
+    for i in iterable:
         prev_v = v.clone()
         u = mu / torch.matmul(K, v)
         v = nu / torch.matmul(K.T, u)
