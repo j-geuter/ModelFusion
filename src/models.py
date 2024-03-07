@@ -111,9 +111,8 @@ class TransportNN(nn.Module):
         :param aggregate_method: Defines the method used to compute the transported label. One of 'match_label'
             (in which case only samples with matching labels are considered), 'all_samples' (in which
             case all samples are considered), 'all_features' (also averages over all samples, but only
-            taking feature distances into account, ignoring label distances), 'all_labels' (also averages over
-            all samples, but only considering label distances, ignoring features), or 'label_distance' (in
-            which case the distance matrix between labels from the source dataset to dataset_star is used for transport).
+            taking feature distances into account, ignoring label distances), or 'all_labels' (also averages over
+            all samples, but only considering label distances, ignoring features).
         :param temperature: temperature for exponential smoothing of feature and label transport. Higher temperature
             equals less entropy, while lower temperature means more entropy.
         """
@@ -152,14 +151,6 @@ class TransportNN(nn.Module):
             [compute_label_distances(dataset, dataset) for dataset in self.datasets]
         )
 
-        # distances between labels across datasets w.r.t. dataset_star
-        self.label_distances_star = tuple(
-            [
-                compute_label_distances(dataset_star, dataset)
-                for dataset in self.datasets
-            ]
-        )
-
     def forward(self, x):
         if x.dim() == 1:
             x = x.unsqueeze(0)
@@ -167,70 +158,21 @@ class TransportNN(nn.Module):
         # reshape x
         initial_shape = x.shape
         x = x.squeeze(1)
-        x = x.view(x.shape[0], -1)
+        x = x.view(x.shape[0], -1) # now of shape N*d (N=number samples, d=sample dim)
 
-        # this is a k*2-tensor, where each row (i,j) means that the i-sample in x is equal to the j-sample in dataset_star
-        matches = (
-            torch.eq(
-                x.unsqueeze(1),
-                self.dataset_star.features.view(
-                    self.dataset_star.features.shape[0], -1
-                ).unsqueeze(0),
-            )
-            .all(dim=2)
-            .nonzero()
-        )
+        # transport x to the prediction dataset
+        x_transported = [
+            self.transport_features(x, dataset)
+            for dataset in self.datasets
+        ]
 
-        # reduce the number of matches to at most one per sample
-        matches_x, matches_indices = torch.unique(matches[:, 0], return_inverse=True)
-        if not len(matches_x) == len(
-            matches_indices
-        ):  # this means there are samples with multiple matches in the reference dataset
-            unique_indices = torch.tensor(
-                [torch.where(matches_indices == i)[0][0] for i in matches_x]
-            )
-            matches = matches[unique_indices]
-
-        # find the x samples that are contained in dataset_star and those that aren't
-        match_samples, match_indices = matches.unbind(1)
-        match_samples = match_samples.to(torch.int)
-        unmatched_sample_indices = torch.tensor(
-            [i for i in range(len(x)) if i not in match_samples], dtype=torch.int
-        )
-
-        if len(unmatched_sample_indices) != 0:
-            x_unmatched = x[unmatched_sample_indices]
-            unmatched_x_transported = [
-                self.transport_features(x_unmatched, dataset)
-                for dataset in self.datasets
-            ]
-        else:
-            unmatched_x_transported = [
-                torch.zeros((0,) + dataset.flattened_feature_dim)
-                for dataset in self.datasets
-            ]
-
-        # transport the samples to the outer datasets and compute the resp. predictions in those datasets
-        if len(match_indices) != 0:
-            matched_x_transported = [
-                dataset[match_indices][0] for dataset in self.datasets
-            ]
-        else:
-            matched_x_transported = [
-                torch.zeros((0,) + dataset.flattened_feature_dim)
-                for dataset in self.datasets
-            ]
-
-        x_transported = [torch.zeros(x.shape) for _ in self.datasets]
-        for item, x_matched, x_unmatched in zip(
-            x_transported, matched_x_transported, unmatched_x_transported
-        ):
-            item[unmatched_sample_indices] = x_unmatched
-            item[match_samples] = x_matched
+        # make prediction using model
         y_transported = [
             model(samples.view(torch.Size([samples.shape[0]]) + initial_shape[1:]))
             for model, samples in zip(self.models, x_transported)
         ]
+
+        # project predictions to label set
         y_projected = [
             project_labels(y, dataset.unique_labels, dataset.high_dim_labels)
             for y, dataset in zip(y_transported, self.datasets)
@@ -239,14 +181,13 @@ class TransportNN(nn.Module):
         # transport the predictions back to dataset_star space and aggregate
         y_star = [
             self.transport_labels(
-                features, y[0], y[1], dataset, label_distances, label_distances_star
+                features, y[0], y[1], dataset, label_distances
             )
-            for features, y, dataset, label_distances, label_distances_star in zip(
+            for features, y, dataset, label_distances in zip(
                 x_transported,
                 y_projected,
                 self.datasets,
                 self.label_distances,
-                self.label_distances_star,
             )
         ]
         y = sum(y_star) / len(y_star)
@@ -285,7 +226,6 @@ class TransportNN(nn.Module):
         y_indices,
         dataset_from,
         label_distances,
-        label_distances_star,
     ):
         """
         Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
@@ -295,8 +235,6 @@ class TransportNN(nn.Module):
         :param dataset_from: the dataset that the labels `y` live in.
         :param label_distances: label distance matrix giving pairwise distances between labels within
             the two datasets.
-        :param label_distances_star: label distance matrix giving pairwise distances between labels across
-            datasets, comparing with labels in dataset_star.
         :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
         """
         if self.method == "match_label":
@@ -304,39 +242,32 @@ class TransportNN(nn.Module):
             mask = torch.all(
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
-            exponentials = (
-                torch.exp(
-                    -torch.cdist(
+            dists = torch.cdist(
                         dataset_from.features.view(dataset_from.features.shape[0], -1),
                         x.view(x.shape[0], -1),
-                    )
-                    ** 2
-                )
-                * mask
-            )
+                    ) ** 2
+            dists /= dists.mean(0)
+            exponentials = torch.exp(- self.temperature * dists) * mask
 
         elif self.method == "all_samples":
             # matrix of size len(dataset_from)*len(y), where entries are distances between labels
             label_distances = label_distances[dataset_from.label_indices, :][
                 :, y_indices
             ]
-            exponentials = torch.exp(
-                -torch.cdist(
+            dists = torch.cdist(
                     dataset_from.features.view(dataset_from.features.shape[0], -1),
                     x.view(x.shape[0], -1),
-                )
-                ** 2
-                - self.eta * label_distances
-            )
+                ) ** 2 - self.eta * label_distances
+            dists /= dists.mean(0)
+            exponentials = torch.exp(-self.temperature * dists)
 
         elif self.method == "all_features":
-            exponentials = torch.exp(
-                -torch.cdist(
-                    dataset_from.features.view(dataset_from.features.shape[0], -1),
-                    x.view(x.shape[0], -1),
-                )
-                ** 2
-            )
+            dists = torch.cdist(
+                dataset_from.features.view(dataset_from.features.shape[0], -1),
+                x.view(x.shape[0], -1),
+            ) ** 2
+            dists /= dists.mean(0)
+            exponentials = torch.exp(-self.temperature * dists)
 
         elif self.method == "all_labels":
             label_distances = label_distances[dataset_from.label_indices, :][
@@ -344,16 +275,10 @@ class TransportNN(nn.Module):
             ]
             exponentials = torch.exp(-label_distances)
 
-        elif self.method == "label_distance":
-            label_distances = label_distances_star[self.dataset_star.label_indices, :][
-                :, y_indices
-            ]
-            exponentials = torch.exp(-label_distances)
-
         else:
             raise ValueError(
                 f"Method {self.method} not implemented! "
-                f"Choose one of 'match_label', 'all_samples', 'all_features', or 'label_distance'."
+                f"Choose one of 'match_label', 'all_samples', or 'all_features'."
             )
 
         transported_y = (

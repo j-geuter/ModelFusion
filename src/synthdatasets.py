@@ -10,6 +10,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CustomDataset(Dataset):
     def __init__(self, features, labels, low_dim_labels=True):
+        """
+        Creates a dataset.
+        :param features: Features of the dataset.
+        :param labels: Labels of the dataset.
+        :param low_dim_labels: Set to True if the labels are low dimensional,
+            e.g. digits. Set to False if labels are high-dimensional, e.g. one-hot-vectors.
+        """
         self.features = features
         if labels.dim() == 1:
             labels = labels.unsqueeze(1)

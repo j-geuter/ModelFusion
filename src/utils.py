@@ -1,7 +1,43 @@
 import torch
 import matplotlib.pyplot as plt
 from copy import deepcopy
+import numpy as np
 
+def plot_images(images):
+    # Assuming images is an array of shape (n, 1, d, d)
+    if images.dim() == 4:
+        n, _, d, _ = images.shape
+    elif images.dim() == 2:
+        n, dd = images.shape
+        d = int(np.sqrt(dd))
+        images = images.reshape(n, d, d)
+        images = images.unsqueeze(1)
+    elif images.dim() == 3:
+        n, d, _ = images.shape
+        images = images.unsqueeze(1)
+    else:
+        raise TypeError("`Images` of wrong shape.")
+
+    # Determine the size of the grid
+    grid_size = int(np.ceil(np.sqrt(n)))
+
+    # Create a blank canvas for the grid
+    fig, axes = plt.subplots(grid_size, grid_size, figsize=(8, 8))
+
+    # Flatten the axes if the grid is not square
+    axes = axes.flatten()
+
+    # Plot each image in the grid
+    for i in range(n):
+        ax = axes[i]
+        ax.axis('off')  # Turn off axis labels
+        ax.imshow(images[i, 0], cmap='gray')  # Assuming images are grayscale
+
+    # Hide any remaining empty subplots
+    for i in range(n, grid_size * grid_size):
+        axes[i].axis('off')
+
+    plt.show()
 
 def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=False, plot=False):
     """

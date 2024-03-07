@@ -19,7 +19,7 @@ def sinkhorn(
     verbose=True,
     min_start=None,
     max_start=None,
-    show_progress_bar=False
+    show_progress_bar=True
 ):
     """
     Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
@@ -39,14 +39,22 @@ def sinkhorn(
     :param show_progress_bar: if True, shows a progress bar.
     :return: If log==False: transport costs. Else: A dict with keys 'cost' (transport costs), 'plan' (transport plans), 'iterations' (number of iterations), 'u' (first dual potential, NOT the scaling vector), 'v' (second dual potential, NOT the scaling vector), 'average marginal constraint violation'.
     """
-    mu = d1.clone().to(device)
-    nu = d2.clone().to(device)
+    if not abs(d1.sum() - 1) < 1e-6:
+        logging.warning("d1 does not sum to 1! Rescaled to probability measure.")
+        mu = (d1 / d1.sum()).clone().to(device)
+    else:
+        mu = d1.clone().to(device)
+    if not abs(d2.sum() - 1) < 1e-6:
+        logging.warning("d2 does not sum to 1! Rescaled to probability measure.")
+        nu = (d2 / d2.sum()).clone().to(device)
+    else:
+        nu = d2.clone().to(device)
     if mu.dim() == 1:
         mu = mu[None, :]
     if nu.dim() == 1:
         nu = nu[None, :]
     if start == None:
-        start = torch.ones(mu.size())
+        start = torch.ones(nu.size())
     start = start.detach().to(device)
     if max_start:
         start = torch.where(
