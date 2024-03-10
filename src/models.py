@@ -91,7 +91,7 @@ class TransportNN(nn.Module):
         permute_star=False,
         eta=1,
         aggregate_method="all_features",
-        temperature = 10
+        temperature = 100
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
@@ -168,7 +168,7 @@ class TransportNN(nn.Module):
 
         # make prediction using model
         y_transported = [
-            model(samples.view(torch.Size([samples.shape[0]]) + initial_shape[1:]))
+            model(samples.view(samples.shape[0], 1, model.dim, model.dim))
             for model, samples in zip(self.models, x_transported)
         ]
 
@@ -390,17 +390,19 @@ def pad_weights(net, layer_sizes, pad_from="top"):
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_classes=10, location=None):
+    def __init__(self, num_classes=10, dim=28, location=None):
+        self.dim=dim
         super(SimpleCNN, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
         self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)
+        reduced_dim = int(self.dim/4)
+        self.fc1 = nn.Linear(64 * reduced_dim * reduced_dim, 128)
         self.fc2 = nn.Linear(128, num_classes)
         self.par_number = sum(p.numel() for p in self.parameters() if p.requires_grad)
         if location is not None:
-            self.load_model(location)
+            self.load(location)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -415,14 +417,14 @@ class SimpleCNN(nn.Module):
         x = self.fc2(x)
         return x
 
-    def save_model(self, location):
+    def save(self, location):
         """
         Save the model to `location`.
         """
         torch.save(self.state_dict(), location)
         print(f"Model saved to {location}")
 
-    def load_model(self, location):
+    def load(self, location):
         """
         Load a model from `location`.
         """
