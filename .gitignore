@@ -4,3 +4,4 @@ __pycache__/*
 venv/*
 src/__pycache__/*
 src/data/*
+src/models/warmstart.pt
