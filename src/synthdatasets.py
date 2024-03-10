@@ -326,7 +326,9 @@ class InterpolGMMs:
                 t=t,
                 one_hot_matrix=label_matrix,
             )
-            self.datasets.insert(-1, CustomDataset(samples, labels, low_dim_labels=False))
+            self.datasets.insert(
+                -1, CustomDataset(samples, labels, low_dim_labels=False)
+            )
             test_labels = embed_labels(
                 self.label_dim,
                 x1_labels_test,
@@ -334,7 +336,9 @@ class InterpolGMMs:
                 t=t,
                 one_hot_matrix=label_matrix,
             )
-            self.test_datasets.insert(-1, CustomDataset(test_samples, test_labels, low_dim_labels=False))
+            self.test_datasets.insert(
+                -1, CustomDataset(test_samples, test_labels, low_dim_labels=False)
+            )
 
         if low_dim_labels:
             for i in [0, -1]:

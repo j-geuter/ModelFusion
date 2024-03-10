@@ -91,7 +91,7 @@ class TransportNN(nn.Module):
         permute_star=False,
         eta=1,
         aggregate_method="all_features",
-        temperature = 100
+        temperature=100,
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
@@ -158,12 +158,11 @@ class TransportNN(nn.Module):
         # reshape x
         initial_shape = x.shape
         x = x.squeeze(1)
-        x = x.view(x.shape[0], -1) # now of shape N*d (N=number samples, d=sample dim)
+        x = x.view(x.shape[0], -1)  # now of shape N*d (N=number samples, d=sample dim)
 
         # transport x to the prediction dataset
         x_transported = [
-            self.transport_features(x, dataset)
-            for dataset in self.datasets
+            self.transport_features(x, dataset) for dataset in self.datasets
         ]
 
         # make prediction using model
@@ -180,9 +179,7 @@ class TransportNN(nn.Module):
 
         # transport the predictions back to dataset_star space and aggregate
         y_star = [
-            self.transport_labels(
-                features, y[0], y[1], dataset, label_distances
-            )
+            self.transport_labels(features, y[0], y[1], dataset, label_distances)
             for features, y, dataset, label_distances in zip(
                 x_transported,
                 y_projected,
@@ -203,13 +200,16 @@ class TransportNN(nn.Module):
         transported_features = dataset_to.features.view(
             dataset_to.features.shape[0], -1
         )
-        dists = torch.cdist(
+        dists = (
+            torch.cdist(
                 self.dataset_star.features.view(
                     self.dataset_star.features.shape[0], -1
                 ),
                 x.view(x.shape[0], -1),
-            ) ** 2
-        dists /= dists.mean(0) # normalizes distances to avoid NaNs
+            )
+            ** 2
+        )
+        dists /= dists.mean(0)  # normalizes distances to avoid NaNs
         exponentials = torch.exp(-self.temperature * dists)
         weighted_transported_features = torch.matmul(
             transported_features.T, exponentials
@@ -242,30 +242,40 @@ class TransportNN(nn.Module):
             mask = torch.all(
                 (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
-            dists = torch.cdist(
-                        dataset_from.features.view(dataset_from.features.shape[0], -1),
-                        x.view(x.shape[0], -1),
-                    ) ** 2
+            dists = (
+                torch.cdist(
+                    dataset_from.features.view(dataset_from.features.shape[0], -1),
+                    x.view(x.shape[0], -1),
+                )
+                ** 2
+            )
             dists /= dists.mean(0)
-            exponentials = torch.exp(- self.temperature * dists) * mask
+            exponentials = torch.exp(-self.temperature * dists) * mask
 
         elif self.method == "all_samples":
             # matrix of size len(dataset_from)*len(y), where entries are distances between labels
             label_distances = label_distances[dataset_from.label_indices, :][
                 :, y_indices
             ]
-            dists = torch.cdist(
+            dists = (
+                torch.cdist(
                     dataset_from.features.view(dataset_from.features.shape[0], -1),
                     x.view(x.shape[0], -1),
-                ) ** 2 - self.eta * label_distances
+                )
+                ** 2
+                - self.eta * label_distances
+            )
             dists /= dists.mean(0)
             exponentials = torch.exp(-self.temperature * dists)
 
         elif self.method == "all_features":
-            dists = torch.cdist(
-                dataset_from.features.view(dataset_from.features.shape[0], -1),
-                x.view(x.shape[0], -1),
-            ) ** 2
+            dists = (
+                torch.cdist(
+                    dataset_from.features.view(dataset_from.features.shape[0], -1),
+                    x.view(x.shape[0], -1),
+                )
+                ** 2
+            )
             dists /= dists.mean(0)
             exponentials = torch.exp(-self.temperature * dists)
 
@@ -391,13 +401,13 @@ def pad_weights(net, layer_sizes, pad_from="top"):
 
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes=10, dim=28, location=None):
-        self.dim=dim
+        self.dim = dim
         super(SimpleCNN, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
         self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        reduced_dim = int(self.dim/4)
+        reduced_dim = int(self.dim / 4)
         self.fc1 = nn.Linear(64 * reduced_dim * reduced_dim, 128)
         self.fc2 = nn.Linear(128, num_classes)
         self.par_number = sum(p.numel() for p in self.parameters() if p.requires_grad)

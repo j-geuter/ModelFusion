@@ -11,13 +11,15 @@ from models import SimpleCNN, TransportNN
 from train_mnist import test_accuracy
 
 TRAIN_DATASET = "mnist"  # `mnist`, `usps`, or `fashion`. The dataset on which a trained model is given
-TEST_DATASET = "fashion" # `mnist`, `usps`, or `fashion` The dataset on which we want to test
+TEST_DATASET = (
+    "fashion"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
+)
 BATCH_SIZE = 64
 NUM_SAMPLES = 10000  # number of training samples used in the transport plan
-NUM_TEST_SAMPLES = 2500 # number of test samples
-RESIZE_USPS = False # if True, resizes usps images to 28*28
-REGULARIZER = 0.006 # Regularizer for entropic OT problem. If set to None, computes unregularized plan
-TEMPERATURE = 100 # temperature for the TransportNN plug-in estimations of OT maps
+NUM_TEST_SAMPLES = 2500  # number of test samples
+RESIZE_USPS = False  # if True, resizes usps images to 28*28
+REGULARIZER = 0.006  # Regularizer for entropic OT problem. If set to None, computes unregularized plan
+TEMPERATURE = 100  # temperature for the TransportNN plug-in estimations of OT maps
 
 torch.manual_seed(42)
 
@@ -33,14 +35,14 @@ transform = transforms.Compose(
 
 # same as above, but additionally resizing to 28*28
 resize_transform = transforms.Compose(
-        [
-            transforms.ToTensor(),  # Convert images to tensors
-            transforms.Normalize(
-                (0.5,), (0.5,)
-            ),  # Normalize pixel values to the range [-1, 1]
-            transforms.Resize((28, 28))
-        ]
-    )
+    [
+        transforms.ToTensor(),  # Convert images to tensors
+        transforms.Normalize(
+            (0.5,), (0.5,)
+        ),  # Normalize pixel values to the range [-1, 1]
+        transforms.Resize((28, 28)),
+    ]
+)
 
 if RESIZE_USPS:
     usps_transform = resize_transform
@@ -57,8 +59,8 @@ elif TRAIN_DATASET == "fashion":
     )
 elif TRAIN_DATASET == "usps":
     train_source_dataset = datasets.USPS(
-    root="./data", train=True, download=True, transform=usps_transform
-)
+        root="./data", train=True, download=True, transform=usps_transform
+    )
 else:
     raise ValueError("`TRAIN_DATASET` must be one of `mnist`, `fashion`, or `usps`.")
 
@@ -83,20 +85,32 @@ elif TEST_DATASET == "usps":
     test_dataset = datasets.USPS(
         root="./data", train=False, download=True, transform=usps_transform
     )
-    if not RESIZE_USPS: # the resized dataset is still needed for computing the cost matrix
+    if (
+        not RESIZE_USPS
+    ):  # the resized dataset is still needed for computing the cost matrix
         resized_train_target_dataset = datasets.USPS(
             root="./data", train=True, download=True, transform=resize_transform
         )
-        resized_train_target_features = torch.cat([resized_train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0)
+        resized_train_target_features = torch.cat(
+            [resized_train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
+        )
 
 
 else:
     raise ValueError("`TEST_DATASET` must be one of `mnist`, `fashion`, or `usps`.")
 
-train_source_features = torch.cat([train_source_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0)
-train_source_labels = torch.tensor([train_source_dataset[i][1] for i in range(NUM_SAMPLES)])
-train_target_features = torch.cat([train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0)
-train_target_labels = torch.tensor([train_target_dataset[i][1] for i in range(NUM_SAMPLES)])
+train_source_features = torch.cat(
+    [train_source_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
+)
+train_source_labels = torch.tensor(
+    [train_source_dataset[i][1] for i in range(NUM_SAMPLES)]
+)
+train_target_features = torch.cat(
+    [train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
+)
+train_target_labels = torch.tensor(
+    [train_target_dataset[i][1] for i in range(NUM_SAMPLES)]
+)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 train_source_dataset = CustomDataset(train_source_features, train_source_labels)
@@ -122,17 +136,25 @@ mu = torch.ones(train_source_dataset.num_samples) / train_source_dataset.num_sam
 nu = torch.ones(train_target_dataset.num_samples) / train_target_dataset.num_samples
 if TEST_DATASET == "usps" and not RESIZE_USPS:
     cost = (
-            torch.cdist(
-                train_source_dataset.features.view(train_source_dataset.features.shape[0], -1),
-                resized_train_target_features.view(resized_train_target_features.shape[0], -1),
-            )
-            ** 2
+        torch.cdist(
+            train_source_dataset.features.view(
+                train_source_dataset.features.shape[0], -1
+            ),
+            resized_train_target_features.view(
+                resized_train_target_features.shape[0], -1
+            ),
+        )
+        ** 2
     )
 else:
     cost = (
         torch.cdist(
-            train_source_dataset.features.view(train_source_dataset.features.shape[0], -1),
-            train_target_dataset.features.view(train_target_dataset.features.shape[0], -1),
+            train_source_dataset.features.view(
+                train_source_dataset.features.shape[0], -1
+            ),
+            train_target_dataset.features.view(
+                train_target_dataset.features.shape[0], -1
+            ),
         )
         ** 2
     )
@@ -141,23 +163,41 @@ cost /= cost.max()
 if REGULARIZER is None:
     T = ot.emd(mu, nu, cost)
 else:
-    T = sinkhorn(mu, nu, cost, REGULARIZER, 1000, normThr=1e-7, show_progress_bar=True, tens_type=torch.float64)[1].to(torch.float32)
+    T = sinkhorn(
+        mu,
+        nu,
+        cost,
+        REGULARIZER,
+        1000,
+        normThr=1e-7,
+        show_progress_bar=True,
+        tens_type=torch.float64,
+    )[1].to(torch.float32)
 
 aligned_features = train_source_dataset.num_samples * torch.einsum(
-    'nl,lxy->nxy',
-    T,
-    train_target_dataset.features
+    "nl,lxy->nxy", T, train_target_dataset.features
 )
 
-aligned_labels = train_source_dataset.num_samples * torch.matmul(T, train_target_dataset.high_dim_labels)
-train_target_dataset_aligned = CustomDataset(aligned_features, aligned_labels, low_dim_labels=False)
+aligned_labels = train_source_dataset.num_samples * torch.matmul(
+    T, train_target_dataset.high_dim_labels
+)
+train_target_dataset_aligned = CustomDataset(
+    aligned_features, aligned_labels, low_dim_labels=False
+)
 
-transportNN = TransportNN([model], [train_source_dataset], train_target_dataset_aligned, temperature=TEMPERATURE)
+transportNN = TransportNN(
+    [model],
+    [train_source_dataset],
+    train_target_dataset_aligned,
+    temperature=TEMPERATURE,
+)
 
 # train_acc = test_accuracy(transportNN, train_loader, max_samples=2000)
 # print(f"TransportNN accuracy on train set: {train_acc}")
 n_test_loader = len(test_loader) * BATCH_SIZE
 if n_test_loader < NUM_TEST_SAMPLES:
-    logging.warning(f"`NUM_TEST_SAMPLES`={NUM_TEST_SAMPLES}, but the DataLoader only has {n_test_loader} samples.")
+    logging.warning(
+        f"`NUM_TEST_SAMPLES`={NUM_TEST_SAMPLES}, but the DataLoader only has {n_test_loader} samples."
+    )
 test_acc = test_accuracy(transportNN, test_loader, max_samples=NUM_TEST_SAMPLES)
 print(f"TransportNN accuracy on test set: {test_acc}")

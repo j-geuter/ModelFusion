@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import numpy as np
 
+
 def plot_images(images):
     # Assuming images is an array of shape (n, 1, d, d)
     if images.dim() == 4:
@@ -30,14 +31,15 @@ def plot_images(images):
     # Plot each image in the grid
     for i in range(n):
         ax = axes[i]
-        ax.axis('off')  # Turn off axis labels
-        ax.imshow(images[i, 0], cmap='gray')  # Assuming images are grayscale
+        ax.axis("off")  # Turn off axis labels
+        ax.imshow(images[i, 0], cmap="gray")  # Assuming images are grayscale
 
     # Hide any remaining empty subplots
     for i in range(n, grid_size * grid_size):
-        axes[i].axis('off')
+        axes[i].axis("off")
 
     plt.show()
+
 
 def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=False, plot=False):
     """

@@ -19,7 +19,7 @@ def sinkhorn(
     verbose=True,
     min_start=None,
     max_start=None,
-    show_progress_bar=True
+    show_progress_bar=True,
 ):
     """
     Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.

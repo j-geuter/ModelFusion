@@ -73,7 +73,7 @@ def load_data(dataset, resize=False, batch_size=64):
                 transforms.Normalize(
                     (0.5,), (0.5,)
                 ),  # Normalize pixel values to the range [-1, 1]
-                transforms.Resize((28, 28))
+                transforms.Resize((28, 28)),
             ]
         )
     if dataset == "mnist":
