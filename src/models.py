@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from synthdatasets import CustomDataset
+
 
 class TemperatureScaledSoftmax(nn.Module):
     def __init__(self, temperature):
@@ -92,15 +94,17 @@ class TransportNN(nn.Module):
         eta=1,
         aggregate_method="all_features",
         temperature=100,
+        dual_potential=None,
+        reg=None
     ):
         """
         Creates a non-parametric model from `models` trained on `datasets`.
         The model can be used on `dataset_star`, but internally transports samples
         from `dataset_star` to the other `datasets` to use `models` in these domains,
         and then transporting their predictions back to `dataset_star`.
-        :param models: iterable of models.
+        :param models: iterable of models. Can also be a single model.
         :param datasets: iterable of datasets corresponding to `models`. Must be of
-            same length.
+            same length. Can also be a single dataset.
         :param dataset_star: This is the domain the model will be used on.
         :param plan: Optional transport plan. If given, permutes all datasets indexed
             by `plan_indices` according to the plan.
@@ -115,15 +119,23 @@ class TransportNN(nn.Module):
             all samples, but only considering label distances, ignoring features).
         :param temperature: temperature for exponential smoothing of feature and label transport. Higher temperature
             equals less entropy, while lower temperature means more entropy.
+        :param dual_potential: dual potential of the OT map between datasets. If passed, compute
+            the plug-in estimates using the dual potential.
+        :param reg: regularizer used in the transport plan. Only needed if plug-in estimates
+            are computed using the dual potential, i.e. when `dual_potential` is not None.
         """
         super(TransportNN, self).__init__()
-        assert len(models) == len(
-            datasets
-        ), "Length of `models` and `datasets` must be equal!"
-        self.models = tuple(models)
+        if isinstance(models, nn.Module):
+            self.models=(models,)
+        else:
+            self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
         self.method = aggregate_method
         self.temperature = temperature
+        self.dual_potential= dual_potential
+        self.reg = reg
+        if isinstance(datasets, CustomDataset):
+            datasets = [datasets]
         if plan is not None:
             nonzero_indices = torch.nonzero(plan)
             plan_permutation = nonzero_indices.unbind(1)[1]
@@ -146,12 +158,21 @@ class TransportNN(nn.Module):
             self.dataset_star = dataset_star
             self.datasets = tuple(datasets)
 
+        assert len(self.models) == len(
+            self.datasets
+        ), "Length of `models` and `datasets` must be equal!"
+
         # distances between labels within datasets
         self.label_distances = tuple(
             [compute_label_distances(dataset, dataset) for dataset in self.datasets]
         )
 
+        self.direct_interpolation = False # if True, compute predictions by interpolating between
+            # sample predictions in `dataset_star` space, independent of the model
+
     def forward(self, x):
+        if self.direct_interpolation:
+            return self.interpolate(x)
         if x.dim() == 1:
             x = x.unsqueeze(0)
 
@@ -190,6 +211,37 @@ class TransportNN(nn.Module):
         y = sum(y_star) / len(y_star)
         return y
 
+    def interpolate(self, x):
+        """
+        Computes predictions in `dataset_star` space by interpolating between samples.
+        This is independent of the model or `self.datasets`, is learning-free, and serves
+        as a baseline for more sophisticated prediction algorithms.
+        :param x: input.
+        :return: output prediction.
+        """
+        dists = (
+                torch.cdist(
+                    self.dataset_star.features.view(
+                        self.dataset_star.features.shape[0], -1
+                    ),
+                    x.view(x.shape[0], -1),
+                )
+                ** 2
+        )
+        dists /= dists.mean(0)  # normalizes distances to avoid NaNs
+        exponentials = torch.exp(-self.temperature * dists)
+        y = (
+            self.dataset_star.labels
+            if self.dataset_star.high_dim_labels is None
+            else self.dataset_star.high_dim_labels
+        )
+        weighted_labels = torch.matmul(y.T, exponentials)
+        normalized_labels = (
+                weighted_labels / exponentials.sum(dim=0)
+        ).T
+        return normalized_labels
+
+
     def transport_features(self, x, dataset_to):
         """
         Projects features `x` from `dataset_star` to `dataset_to` using the transport map.
@@ -209,8 +261,11 @@ class TransportNN(nn.Module):
             )
             ** 2
         )
+        if self.dual_potential is not None:
+            dists -= self.dual_potential.unsqueeze(1)
         dists /= dists.mean(0)  # normalizes distances to avoid NaNs
         exponentials = torch.exp(-self.temperature * dists)
+
         weighted_transported_features = torch.matmul(
             transported_features.T, exponentials
         )

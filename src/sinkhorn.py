@@ -29,7 +29,7 @@ def sinkhorn(
     :param eps: regularizer.
     :param max_iter: maximum number of iterations.
     :param start: first iteration's starting vector. If None, this is set to ones.
-    :param log: if True, returns the optimal plan and dual potentials alongside the cost; otherwise, returns only the cost.
+    :param log: if True, also computes the average marginal constraint violation and returns it.
     :param mcvThr: if greater than 0, the algorithm terminates if all approximations lie below this threshold, measured in terms of marginal constraint violation.
     :param normThr: terminates once all approximations lie within this threshold to their previous iterates, in terms of euclidean distance. Normalized by the norm at the start. 1e-3 to 1e-4 seem to be good choices.
     :param tens_type: determines the dtype of all tensors involved in computations.
@@ -37,7 +37,10 @@ def sinkhorn(
     :param min_start: if given, sets all entries in the starting vector smaller than `min_start` equal to `min_start`.
     :param max_start: if given, sets all entries in the starting vector larger than `max_start` equal to `max_start`.
     :param show_progress_bar: if True, shows a progress bar.
-    :return: If log==False: transport costs. Else: A dict with keys 'cost' (transport costs), 'plan' (transport plans), 'iterations' (number of iterations), 'u' (first dual potential, NOT the scaling vector), 'v' (second dual potential, NOT the scaling vector), 'average marginal constraint violation'.
+    :return: A dict with keys 'cost' (transport costs), 'plan' (transport plans), 'iterations' (number of iterations),
+        'f' (first dual potential), 'g' (second dual potential),
+        'u' (first scaling vector), 'v' (second scaling vector),
+        'avgMCV' (average marginal constraint violations, only returned if `log`==True).
     """
     if not abs(d1.sum() - 1) < 1e-6:
         logging.warning("d1 does not sum to 1! Rescaled to probability measure.")
@@ -131,12 +134,20 @@ def sinkhorn(
         ),
     )
     cost = (gamma * C).sum(1).sum(1)
+    perc_nan = 100 * cost.isnan().sum() / len(cost)
+    if perc_nan > 0:
+        perc_nan = "%.2f" % perc_nan
+        logging.warning(f"{perc_nan}% of transport costs are NaN.")
     if not log:
-        perc_nan = 100 * cost.isnan().sum() / len(cost)
-        if perc_nan > 0:
-            perc_nan = "%.2f" % perc_nan
-            logging.warning(f"{perc_nan}% of transport costs are NaN.")
-        return cost, gamma.squeeze()
+        return {
+            "cost": cost,
+            "plan": gamma.squeeze(),
+            "iterations": it,
+            "f": eps * torch.log(u).T,
+            "g": eps * torch.log(v).T,
+            "u": u.T,
+            "v": v.T,
+        }
     else:
         mu_star = torch.matmul(gamma, torch.ones(u.size(0)).to(tens_type).to(device))
         nu_star = torch.matmul(torch.ones(u.size(0)).to(tens_type).to(device), gamma)
@@ -166,8 +177,10 @@ def sinkhorn(
             "cost": cost,
             "plan": gamma.squeeze(),
             "iterations": it,
-            "u": eps * torch.log(u).T,
-            "v": eps * torch.log(v).T,
+            "f": eps * torch.log(u).T,
+            "g": eps * torch.log(v).T,
+            "u": u.T,
+            "v": v.T,
             "avgMCV": (mu_err + nu_err) / 2,
         }
 

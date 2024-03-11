@@ -12,14 +12,15 @@ from train_mnist import test_accuracy
 
 TRAIN_DATASET = "mnist"  # `mnist`, `usps`, or `fashion`. The dataset on which a trained model is given
 TEST_DATASET = (
-    "fashion"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
+    "usps"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
 )
 BATCH_SIZE = 64
-NUM_SAMPLES = 10000  # number of training samples used in the transport plan
+NUM_SAMPLES = 2500 # number of training samples used in the transport plan
 NUM_TEST_SAMPLES = 2500  # number of test samples
 RESIZE_USPS = False  # if True, resizes usps images to 28*28
-REGULARIZER = 0.006  # Regularizer for entropic OT problem. If set to None, computes unregularized plan
+REGULARIZER = None # Regularizer for entropic OT problem. If set to None, computes unregularized plan
 TEMPERATURE = 100  # temperature for the TransportNN plug-in estimations of OT maps
+DUAL_PLUGIN = False # if True, computes the plug-in estimates using the dual potential
 
 torch.manual_seed(42)
 
@@ -162,8 +163,9 @@ else:
 cost /= cost.max()
 if REGULARIZER is None:
     T = ot.emd(mu, nu, cost)
+    g = None
 else:
-    T = sinkhorn(
+    log = sinkhorn(
         mu,
         nu,
         cost,
@@ -172,24 +174,31 @@ else:
         normThr=1e-7,
         show_progress_bar=True,
         tens_type=torch.float64,
-    )[1].to(torch.float32)
+    )
+    T = log['plan'].to(torch.float32)
+    g = log['g'][0].to(torch.float32) if DUAL_PLUGIN else None
 
-aligned_features = train_source_dataset.num_samples * torch.einsum(
-    "nl,lxy->nxy", T, train_target_dataset.features
-)
+if not DUAL_PLUGIN:
+    aligned_features = train_source_dataset.num_samples * torch.einsum(
+        "nl,lxy->nxy", T, train_target_dataset.features
+    )
 
-aligned_labels = train_source_dataset.num_samples * torch.matmul(
-    T, train_target_dataset.high_dim_labels
-)
-train_target_dataset_aligned = CustomDataset(
-    aligned_features, aligned_labels, low_dim_labels=False
-)
+    aligned_labels = train_source_dataset.num_samples * torch.matmul(
+        T, train_target_dataset.high_dim_labels
+    )
+    train_target_dataset_aligned = CustomDataset(
+        aligned_features, aligned_labels, low_dim_labels=False
+    )
+else:
+    train_target_dataset_aligned = train_target_dataset
 
 transportNN = TransportNN(
-    [model],
-    [train_source_dataset],
+    model,
+    train_source_dataset,
     train_target_dataset_aligned,
     temperature=TEMPERATURE,
+    dual_potential=g,
+    reg=REGULARIZER
 )
 
 # train_acc = test_accuracy(transportNN, train_loader, max_samples=2000)
