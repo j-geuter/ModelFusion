@@ -17,10 +17,11 @@ TEST_DATASET = (
 BATCH_SIZE = 64
 NUM_SAMPLES = 2500 # number of training samples used in the transport plan
 NUM_TEST_SAMPLES = 2500  # number of test samples
-RESIZE_USPS = False  # if True, resizes usps images to 28*28
+RESIZE_USPS = True  # if True, resizes usps images to 28*28
 REGULARIZER = None # Regularizer for entropic OT problem. If set to None, computes unregularized plan
 TEMPERATURE = 100  # temperature for the TransportNN plug-in estimations of OT maps
 DUAL_PLUGIN = False # if True, computes the plug-in estimates using the dual potential
+OTDD_COST = False # if True, the cost between datasets takes label distances into account
 
 torch.manual_seed(42)
 
@@ -95,6 +96,11 @@ elif TEST_DATASET == "usps":
         resized_train_target_features = torch.cat(
             [resized_train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
         )
+        resized_train_target_labels = torch.tensor(
+            [resized_train_target_dataset[i][1] for i in range(NUM_SAMPLES)]
+        )
+        resized_train_target_dataset = CustomDataset(resized_train_target_features, resized_train_target_labels)
+
 
 
 else:

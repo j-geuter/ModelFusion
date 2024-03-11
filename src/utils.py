@@ -52,8 +52,9 @@ def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=False, plot
         both directions (from `dataset_1` to `dataset_2` and vice versa).
     :param dataset_1: First dataset.
     :param dataset_2: Second dataset.
-    :param plan: Transport plan. If none, assumes that the datasets are already
-        aligned according to the plan.
+    :param plan: Transport plan. If None, assumes that the datasets are already
+        aligned according to the plan. Otherwise, aligns `dataset_2` according
+        to the plan.
     :param symmetric: If True, symmetrizes the values.
     :param plot: If True, plots the matrix with a heat map.
     :return: Matrix containing class correspondences.
