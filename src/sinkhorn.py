@@ -23,8 +23,8 @@ def sinkhorn(
 ):
     """
     Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
-    :param d1: first distribution. Two-dimensional tensor where first dimension corresponds to number of samples and second dimension to sample size. Can also be 1D for a single sample.
-    :param d2: second distribution. Two-dimensional tensor as above.
+    :param d1: source distribution(s). Two-dimensional tensor where first dimension corresponds to number of samples and second dimension to sample size. Can also be 1D for a single sample.
+    :param d2: target distribution(s). Two-dimensional tensor as above.
     :param C: cost matrix. Two-dimensional tensor.
     :param eps: regularizer.
     :param max_iter: maximum number of iterations.
@@ -42,21 +42,19 @@ def sinkhorn(
         'u' (first scaling vector), 'v' (second scaling vector),
         'avgMCV' (average marginal constraint violations, only returned if `log`==True).
     """
-    if not abs(d1.sum() - 1) < 1e-6:
-        logging.warning("d1 does not sum to 1! Rescaled to probability measure.")
-        mu = (d1 / d1.sum()).clone().to(device)
-    else:
-        mu = d1.clone().to(device)
-    if not abs(d2.sum() - 1) < 1e-6:
-        logging.warning("d2 does not sum to 1! Rescaled to probability measure.")
-        nu = (d2 / d2.sum()).clone().to(device)
-    else:
-        nu = d2.clone().to(device)
+    mu = d1.clone().to(device)
+    nu = d2.clone().to(device)
     if mu.dim() == 1:
         mu = mu[None, :]
     if nu.dim() == 1:
         nu = nu[None, :]
-    if start == None:
+    if not torch.all(torch.abs(mu.sum(dim=1) - 1) < 1e-6):
+        logging.warning("d1 does not sum to 1! Rescaled to probability measure.")
+        mu /= mu.sum(dim=1).unsqueeze(1)
+    if not torch.all(torch.abs(nu.sum(dim=1) - 1) < 1e-6):
+        logging.warning("d2 does not sum to 1! Rescaled to probability measure.")
+        nu /= nu.sum(dim=1).unsqueeze(1)
+    if start is None:
         start = torch.ones(nu.size())
     start = start.detach().to(device)
     if max_start:

@@ -7,21 +7,32 @@ from logger import logging
 
 from sinkhorn import sinkhorn
 from synthdatasets import CustomDataset
-from models import SimpleCNN, TransportNN
+from models import SimpleCNN, TransportNN, compute_label_distances
 from train_mnist import test_accuracy
+from utils import class_correspondences
 
 TRAIN_DATASET = "mnist"  # `mnist`, `usps`, or `fashion`. The dataset on which a trained model is given
 TEST_DATASET = (
-    "usps"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
+    "fashion"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
 )
 BATCH_SIZE = 64
-NUM_SAMPLES = 2500 # number of training samples used in the transport plan
+NUM_SAMPLES = 2500  # number of training samples used in the transport plan
 NUM_TEST_SAMPLES = 2500  # number of test samples
 RESIZE_USPS = True  # if True, resizes usps images to 28*28
-REGULARIZER = None # Regularizer for entropic OT problem. If set to None, computes unregularized plan
+REGULARIZER = None  # Regularizer for entropic OT problem. If set to None, computes unregularized plan
 TEMPERATURE = 100  # temperature for the TransportNN plug-in estimations of OT maps
-DUAL_PLUGIN = False # if True, computes the plug-in estimates using the dual potential
-OTDD_COST = False # if True, the cost between datasets takes label distances into account
+FEATURE_METHOD = "plain_softmax"  # TransportNN method for transporting features from target to source
+LABEL_METHOD = (
+    "plain_softmax"  # TransportNN method for transporting labels from source to target
+)
+OTDD_COST = (
+    True  # if True, the cost between source_datasets takes label distances into account
+)
+PROJECT_LABELS = (
+    True  # if True, projects label predictions on source dataset space before transport
+)
+FEATURE_DIST = True  # if True, use feature distances in computing sample distances when transporting labels
+LABEL_DIST = True  # if True, use label distances in computing sample distances when transporting labels
 
 torch.manual_seed(42)
 
@@ -99,8 +110,9 @@ elif TEST_DATASET == "usps":
         resized_train_target_labels = torch.tensor(
             [resized_train_target_dataset[i][1] for i in range(NUM_SAMPLES)]
         )
-        resized_train_target_dataset = CustomDataset(resized_train_target_features, resized_train_target_labels)
-
+        resized_train_target_dataset = CustomDataset(
+            resized_train_target_features, resized_train_target_labels
+        )
 
 
 else:
@@ -165,10 +177,22 @@ else:
         )
         ** 2
     )
-
 cost /= cost.max()
+
+if OTDD_COST:
+    label_distances = compute_label_distances(
+        train_source_dataset, train_target_dataset
+    )
+    label_distances = label_distances[train_source_dataset.labels.squeeze(), :][
+        :, train_target_dataset.labels.squeeze()
+    ]
+    cost += label_distances
+    cost /= cost.max()
+
+
 if REGULARIZER is None:
     T = ot.emd(mu, nu, cost)
+    f = None
     g = None
 else:
     log = sinkhorn(
@@ -181,30 +205,25 @@ else:
         show_progress_bar=True,
         tens_type=torch.float64,
     )
-    T = log['plan'].to(torch.float32)
-    g = log['g'][0].to(torch.float32) if DUAL_PLUGIN else None
+    T = log["plan"].to(torch.float32)
+    f = log["f"][0].to(torch.float32)
+    g = log["g"][0].to(torch.float32)
 
-if not DUAL_PLUGIN:
-    aligned_features = train_source_dataset.num_samples * torch.einsum(
-        "nl,lxy->nxy", T, train_target_dataset.features
-    )
-
-    aligned_labels = train_source_dataset.num_samples * torch.matmul(
-        T, train_target_dataset.high_dim_labels
-    )
-    train_target_dataset_aligned = CustomDataset(
-        aligned_features, aligned_labels, low_dim_labels=False
-    )
-else:
-    train_target_dataset_aligned = train_target_dataset
 
 transportNN = TransportNN(
     model,
     train_source_dataset,
-    train_target_dataset_aligned,
+    train_target_dataset,
+    plans=T,
+    feature_method=FEATURE_METHOD,
+    label_method=LABEL_METHOD,
+    feature_dists=FEATURE_DIST,
+    label_dists=LABEL_DIST,
+    project_source_labels=PROJECT_LABELS,
     temperature=TEMPERATURE,
-    dual_potential=g,
-    reg=REGULARIZER
+    f=f,
+    g=g,
+    reg=REGULARIZER,
 )
 
 # train_acc = test_accuracy(transportNN, train_loader, max_samples=2000)

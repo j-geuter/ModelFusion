@@ -8,11 +8,13 @@ def plot_images(images):
     # Assuming images is an array of shape (n, 1, d, d)
     if images.dim() == 4:
         n, _, d, _ = images.shape
+    # Assuming image is an array of shape (n, d^2)
     elif images.dim() == 2:
         n, dd = images.shape
         d = int(np.sqrt(dd))
         images = images.reshape(n, d, d)
         images = images.unsqueeze(1)
+    # Assuming image is an array of shape (n, d, d)
     elif images.dim() == 3:
         n, d, _ = images.shape
         images = images.unsqueeze(1)
@@ -41,7 +43,7 @@ def plot_images(images):
     plt.show()
 
 
-def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=False, plot=False):
+def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=True, plot=True):
     """
     Compute class correspondences of a transport plan `plan` between
         `dataset_1` and `dataset_2`. This returns a matrix of size
@@ -52,7 +54,7 @@ def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=False, plot
         both directions (from `dataset_1` to `dataset_2` and vice versa).
     :param dataset_1: First dataset.
     :param dataset_2: Second dataset.
-    :param plan: Transport plan. If None, assumes that the datasets are already
+    :param plan: Transport plan. If None, assumes that the source_datasets are already
         aligned according to the plan. Otherwise, aligns `dataset_2` according
         to the plan.
     :param symmetric: If True, symmetrizes the values.

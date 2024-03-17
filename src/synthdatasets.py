@@ -41,8 +41,8 @@ class CustomDataset(Dataset):
             self.high_dim_unique_labels = torch.eye(self.num_unique_labels)
             self.high_dim_labels = self.high_dim_unique_labels[self.label_indices]
         else:
-            self.high_dim_labels = None
-            self.high_dim_unique_labels = None
+            self.high_dim_labels = self.labels
+            self.high_dim_unique_labels = self.unique_labels
 
     def __len__(self):
         return self.num_samples
@@ -234,16 +234,16 @@ class InterpolGMMs:
         hard_labels=False,
     ):
         """
-        Creates `nb_interpol` interpolated datasets in between `nb_sets` many GMMs. For now only
-            supports GMMs, and only 2 in total. All datasets must have the same number of samples.
-        :param nb_sets: number of datasets to use for interpolation. Currently only supports `nb_sets=2`.
-        :param nb_interpol: number of datasets to be created. Includes the two initial datasets.
-        :param gmm_kwargs1: optional kwargs for the first of the two datasets.
-        :param gmm_kwargs2: optional kwargs for the second of the two datasets.
-        :param low_dim_labels: if True, does not cast all labels to the same dimension, but keeps labels of the datasets initially created
+        Creates `nb_interpol` interpolated source_datasets in between `nb_sets` many GMMs. For now only
+            supports GMMs, and only 2 in total. All source_datasets must have the same number of samples.
+        :param nb_sets: number of source_datasets to use for interpolation. Currently only supports `nb_sets=2`.
+        :param nb_interpol: number of source_datasets to be created. Includes the two initial source_datasets.
+        :param gmm_kwargs1: optional kwargs for the first of the two source_datasets.
+        :param gmm_kwargs2: optional kwargs for the second of the two source_datasets.
+        :param low_dim_labels: if True, does not cast all labels to the same dimension, but keeps labels of the source_datasets initially created
             (i.e. the ones that are not interpolated) to their intrinsic dimension.
         :param hard_labels: if True, converts all soft labels to hard labels. This only works
-            if the number of classes across all datasets is the same, and if the classes in the first and
+            if the number of classes across all source_datasets is the same, and if the classes in the first and
             last dataset are aligned. Do NOT use if low_dim_labels == True.
         """
         self.datasets = []
@@ -368,8 +368,8 @@ class InterpolGMMs:
                         + dataset._labels[:, soft_label_dim // 2 :]
                     )
 
-                    # in this case, the labels of the interpolated datasets can be chosen to align with the labels of the
-                    # outer datasets, because the outer datasets align
+                    # in this case, the labels of the interpolated source_datasets can be chosen to align with the labels of the
+                    # outer source_datasets, because the outer source_datasets align
                     if len(compressed_labels) == soft_label_dim and torch.all(
                         torch.unique(compressed_labels) == torch.tensor([0.0, 1.0])
                     ):
@@ -389,8 +389,8 @@ class InterpolGMMs:
 
     def plot_datasets(self, datasets=None):
         """
-        Creates plots for all datasets.
-        :param datasets: if None, defaults to the train datasets. The test datasets
+        Creates plots for all source_datasets.
+        :param datasets: if None, defaults to the train source_datasets. The test source_datasets
             can be passed to plot those instead.
         :return: None.
         """

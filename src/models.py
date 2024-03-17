@@ -1,11 +1,14 @@
 from copy import copy, deepcopy
 
+import math
 import ot
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from synthdatasets import CustomDataset
+from costmatrix import euclidean_cost_matrix
+from sinkhorn import sinkhorn
 
 
 class TemperatureScaledSoftmax(nn.Module):
@@ -86,89 +89,141 @@ class TransportNN(nn.Module):
     def __init__(
         self,
         models,
-        datasets,
-        dataset_star,
-        plan=None,
-        plan_indices=None,
-        permute_star=False,
+        source_datasets,
+        target_dataset,
+        plans=None,
         eta=1,
-        aggregate_method="all_features",
+        feature_method="plain_softmax",
+        label_method="plain_softmax",
+        feature_dists=True,
+        label_dists=True,
+        project_source_labels=False,
         temperature=100,
-        dual_potential=None,
-        reg=None
+        f=None,
+        g=None,
+        reg=None,
     ):
         """
-        Creates a non-parametric model from `models` trained on `datasets`.
-        The model can be used on `dataset_star`, but internally transports samples
-        from `dataset_star` to the other `datasets` to use `models` in these domains,
-        and then transporting their predictions back to `dataset_star`.
+        Creates a non-parametric model from `models` trained on `source_datasets`.
+        The model can be used on `target_dataset`, but internally transports samples
+        from `target_dataset` to the other `source_datasets` to use `models` in these domains,
+        and then transporting their predictions back to `target_dataset`.
         :param models: iterable of models. Can also be a single model.
-        :param datasets: iterable of datasets corresponding to `models`. Must be of
+        :param source_datasets: iterable of source_datasets corresponding to `models`. Must be of
             same length. Can also be a single dataset.
-        :param dataset_star: This is the domain the model will be used on.
-        :param plan: Optional transport plan. If given, permutes all datasets indexed
-            by `plan_indices` according to the plan.
-        :param plan_indices: Optional indices of datasets to be permuted by `plan`.
-        :param permute_star: If True, also permutes `dataset_star` along the `plan`.
+        :param target_dataset: This is the domain the model will be used on.
+        :param plans: Optional transport plan(s) - either a single plan, or a list of plans of the
+            same length as `source_datasets`. If given, creates aligned versions of the source datasets
+            and target dataset according to `plans`.
         :param eta: Hyperparameter controlling the tradeoff between a feature- and a
             label-based loss in transporting samples.
-        :param aggregate_method: Defines the method used to compute the transported label. One of 'match_label'
-            (in which case only samples with matching labels are considered), 'all_samples' (in which
-            case all samples are considered), 'all_features' (also averages over all samples, but only
-            taking feature distances into account, ignoring label distances), or 'all_labels' (also averages over
-            all samples, but only considering label distances, ignoring features).
+        :param feature_method: Defines the method used to transport the features. One of
+            "plain_softmax" (softmax with distances in target feature space), or
+            "plugin" (softmax using the dual potential and cross-dataset distances).
+        :param label_method: Defines the method used to transport the labels from source to target
+            domain. One of "plain_softmax" (softmax with distances in source domain),
+            "masked_softmax" (softmax only over samples with matching label; should only be
+            used in conjunction with `project_source_labels`==True); or
+            "plugin" (softmax using the dual potential and cross-dataset distances).
+        :param feature_dists: Toggles whether to use feature distances in computing cost for label transport.
+        :param label_dists: Toggles whether to use label distances in computing cost for label transport.
+        :param project_source_labels: if True, projects labels onto hard labels in source dataset space;
+            otherwise, leaves them as soft labels.
         :param temperature: temperature for exponential smoothing of feature and label transport. Higher temperature
             equals less entropy, while lower temperature means more entropy.
-        :param dual_potential: dual potential of the OT map between datasets. If passed, compute
-            the plug-in estimates using the dual potential.
+        :param f: dual potential(s) of the OT map between source_datasets. If passed, compute
+            the plug-in estimates using the dual potential. Corresponds to source distribution(s). Can be either
+            a tensor if just one model is passed, or a list of dual potentials for multiple models.
+        :param g: second dual potential(s), corresponding to target distribution(s).
         :param reg: regularizer used in the transport plan. Only needed if plug-in estimates
             are computed using the dual potential, i.e. when `dual_potential` is not None.
         """
         super(TransportNN, self).__init__()
         if isinstance(models, nn.Module):
-            self.models=(models,)
+            self.models = (models,)
         else:
             self.models = tuple(models)
         self.eta = eta  # weighs the distance between features with that between labels in the sample distance
-        self.method = aggregate_method
+        self.feature_method = feature_method
+        self.label_method = label_method
         self.temperature = temperature
-        self.dual_potential= dual_potential
-        self.reg = reg
-        if isinstance(datasets, CustomDataset):
-            datasets = [datasets]
-        if plan is not None:
-            nonzero_indices = torch.nonzero(plan)
-            plan_permutation = nonzero_indices.unbind(1)[1]
-            if plan_indices is not None:
-                datasets = list(datasets)
-                for idx in plan_indices:
-                    dataset = deepcopy(datasets[idx])
-                    dataset.permute_data(plan_permutation)
-                    datasets[idx] = dataset
-                self.datasets = tuple(datasets)
-            else:
-                self.datasets = tuple(datasets)
-            if permute_star:
-                dataset_star = deepcopy(dataset_star)
-                dataset_star.permute_data(plan_permutation)
-                self.dataset_star = dataset_star
-            else:
-                self.dataset_star = dataset_star
+        self.project_source_labels = project_source_labels
+        self.feature_dists = feature_dists
+        self.label_dists = label_dists
+        if isinstance(f, torch.Tensor):
+            self.f = [f]
+        elif f is None:
+            self.f = [None for _ in range(len(self.models))]
         else:
-            self.dataset_star = dataset_star
-            self.datasets = tuple(datasets)
+            self.f = f
+        if isinstance(g, torch.Tensor):
+            self.g = [g]
+        elif g is None:
+            self.g = [None for _ in range(len(self.models))]
+        else:
+            self.g = g
+        self.reg = reg
+        if isinstance(source_datasets, CustomDataset):
+            source_datasets = [source_datasets]
+        self.target_dataset = target_dataset
+        self.source_datasets = tuple(source_datasets)
+
+        if isinstance(plans, torch.Tensor):
+            plans = [plans]
+        aligned_source_datasets = []
+        aligned_target_datasets = []
+        for plan, dataset in zip(plans, source_datasets):
+            # align target dataset
+            aligned_target_features = dataset.num_samples * torch.einsum(
+                "nl,lxy->nxy", plan, target_dataset.features
+            )
+            aligned_target_labels = dataset.num_samples * torch.matmul(
+                plan, target_dataset.high_dim_labels
+            )
+            aligned_target_datasets.append(
+                CustomDataset(
+                    aligned_target_features, aligned_target_labels, low_dim_labels=False
+                )
+            )
+
+            # align source dataset
+            aligned_source_features = target_dataset.num_samples * torch.einsum(
+                "nl,lxy->nxy", plan.T, dataset.features
+            )
+            aligned_source_labels = target_dataset.num_samples * torch.matmul(
+                plan.T, dataset.high_dim_labels
+            )
+            aligned_source_datasets.append(
+                CustomDataset(
+                    aligned_source_features, aligned_source_labels, low_dim_labels=False
+                )
+            )
+        self.aligned_source_datasets = tuple(aligned_source_datasets)
+        self.aligned_target_datasets = tuple(aligned_target_datasets)
 
         assert len(self.models) == len(
-            self.datasets
-        ), "Length of `models` and `datasets` must be equal!"
+            self.source_datasets
+        ), "Length of `models` and `source_datasets` must be equal!"
 
-        # distances between labels within datasets
-        self.label_distances = tuple(
-            [compute_label_distances(dataset, dataset) for dataset in self.datasets]
+        # distances between labels within source_datasets
+        self.source_label_distances = tuple(
+            [
+                compute_label_distances(dataset, dataset)
+                for dataset in self.source_datasets
+            ]
         )
 
-        self.direct_interpolation = False # if True, compute predictions by interpolating between
-            # sample predictions in `dataset_star` space, independent of the model
+        self.cross_label_distances = tuple(
+            [
+                compute_label_distances(dataset, self.target_dataset)
+                for dataset in self.source_datasets
+            ]
+        )
+
+        self.direct_interpolation = (
+            False  # if True, compute predictions by interpolating between
+        )
+        # sample predictions in `target_dataset` space, independent of the model
 
     def forward(self, x):
         if self.direct_interpolation:
@@ -177,194 +232,227 @@ class TransportNN(nn.Module):
             x = x.unsqueeze(0)
 
         # reshape x
-        initial_shape = x.shape
         x = x.squeeze(1)
         x = x.view(x.shape[0], -1)  # now of shape N*d (N=number samples, d=sample dim)
 
-        # transport x to the prediction dataset
-        x_transported = [
-            self.transport_features(x, dataset) for dataset in self.datasets
+        # transport x to the source dataset
+        x_s = [
+            self.transport_features(x, dataset, aligned_dataset, f)
+            for dataset, aligned_dataset, f in zip(
+                self.source_datasets, self.aligned_source_datasets, self.f
+            )
         ]
 
-        # make prediction using model
-        y_transported = [
+        # make source predictions using model
+        y_s = [
             model(samples.view(samples.shape[0], 1, model.dim, model.dim))
-            for model, samples in zip(self.models, x_transported)
+            for model, samples in zip(self.models, x_s)
         ]
 
         # project predictions to label set
-        y_projected = [
-            project_labels(y, dataset.unique_labels, dataset.high_dim_labels)
-            for y, dataset in zip(y_transported, self.datasets)
-        ]
+        if self.project_source_labels:
+            y_s = [
+                project_labels(y, dataset.unique_labels, dataset.high_dim_labels)[0]
+                for y, dataset in zip(y_s, self.source_datasets)
+            ]
 
-        # transport the predictions back to dataset_star space and aggregate
-        y_star = [
-            self.transport_labels(features, y[0], y[1], dataset, label_distances)
-            for features, y, dataset, label_distances in zip(
-                x_transported,
-                y_projected,
-                self.datasets,
-                self.label_distances,
+        # transport the predictions back to target_dataset space and aggregate
+        y_t = [
+            self.transport_labels(
+                features,
+                y,
+                dataset,
+                aligned_target_dataset,
+                source_label_distances,
+                cross_label_distances,
+                potential,
+            )
+            for features, y, dataset, aligned_target_dataset, source_label_distances, cross_label_distances, potential in zip(
+                x_s,
+                y_s,
+                self.source_datasets,
+                self.aligned_target_datasets,
+                self.source_label_distances,
+                self.cross_label_distances,
+                self.g,
             )
         ]
-        y = sum(y_star) / len(y_star)
-        return y
+        y_t = sum(y_t) / len(y_t)
+        return y_t
 
     def interpolate(self, x):
         """
-        Computes predictions in `dataset_star` space by interpolating between samples.
-        This is independent of the model or `self.datasets`, is learning-free, and serves
+        Computes predictions in `target_dataset` space by interpolating between samples.
+        This is independent of the model or `self.source_datasets`, is learning-free, and serves
         as a baseline for more sophisticated prediction algorithms.
         :param x: input.
         :return: output prediction.
         """
         dists = (
-                torch.cdist(
-                    self.dataset_star.features.view(
-                        self.dataset_star.features.shape[0], -1
-                    ),
-                    x.view(x.shape[0], -1),
-                )
-                ** 2
-        )
-        dists /= dists.mean(0)  # normalizes distances to avoid NaNs
-        exponentials = torch.exp(-self.temperature * dists)
-        y = (
-            self.dataset_star.labels
-            if self.dataset_star.high_dim_labels is None
-            else self.dataset_star.high_dim_labels
-        )
-        weighted_labels = torch.matmul(y.T, exponentials)
-        normalized_labels = (
-                weighted_labels / exponentials.sum(dim=0)
-        ).T
-        return normalized_labels
-
-
-    def transport_features(self, x, dataset_to):
-        """
-        Projects features `x` from `dataset_star` to `dataset_to` using the transport map.
-        :param x: feature tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
-        :param dataset_to: the dataset that the features are mapped to.
-        :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
-        """
-        transported_features = dataset_to.features.view(
-            dataset_to.features.shape[0], -1
-        )
-        dists = (
             torch.cdist(
-                self.dataset_star.features.view(
-                    self.dataset_star.features.shape[0], -1
+                self.target_dataset.features.view(
+                    self.target_dataset.features.shape[0], -1
                 ),
                 x.view(x.shape[0], -1),
             )
             ** 2
         )
-        if self.dual_potential is not None:
-            dists -= self.dual_potential.unsqueeze(1)
         dists /= dists.mean(0)  # normalizes distances to avoid NaNs
         exponentials = torch.exp(-self.temperature * dists)
+        y = (
+            self.target_dataset.labels
+            if self.target_dataset.high_dim_labels is None
+            else self.target_dataset.high_dim_labels
+        )
+        weighted_labels = torch.matmul(y.T, exponentials)
+        normalized_labels = (weighted_labels / exponentials.sum(dim=0)).T
+        return normalized_labels
 
-        weighted_transported_features = torch.matmul(
-            transported_features.T, exponentials
-        )
-        normalized_transported_features = (
-            weighted_transported_features / exponentials.sum(dim=0)
-        )
-        return normalized_transported_features.T
+    def transport_features(self, x, dataset, aligned_dataset, f):
+        """
+        Projects features `x` from target dataset to source dataset using the transport map.
+        :param x: feature tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
+        :param dataset: the dataset that the features are mapped to.
+        :param aligned_dataset: the dataset the features are mapped to, aligned w.r.t. the target dataset.
+        :param f: dual potential corresponding to source distribution. If passed, compute the plugin
+            estimator using dual potentials. Can be set to None.
+        :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
+        """
+        if self.feature_method == "plain_softmax":
+            exponentials = self.exponential_matrix(self.target_dataset, x)
+            features = aligned_dataset.features.view(
+                aligned_dataset.features.shape[0], -1
+            )
+
+        elif self.feature_method == "plugin":
+            exponentials = self.exponential_matrix(dataset, x, potential=f)
+            features = dataset.features.view(dataset.features.shape[0], -1)
+
+        else:
+            raise ValueError(
+                "`feature_method` must be one of the following:"
+                "`plain_softmax`, `plugin`."
+            )
+
+        weighted_features = features.T @ exponentials
+        normalized_features = weighted_features / exponentials.sum(dim=0)
+
+        return normalized_features.T
 
     def transport_labels(
         self,
         x,
         y,
-        y_indices,
-        dataset_from,
-        label_distances,
+        source_dataset,
+        aligned_target_dataset,
+        source_label_distances,
+        cross_label_distances,
+        potential,
     ):
         """
-        Transports labels `y` from `dataset_from` back onto self.dataset_star using the transport map.
+        Transports labels `y` from `source_dataset` back onto self.target_dataset using the transport map.
         :param x: tensor of size k*d_x, where k is the number of samples, and d_x their dimension.
         :param y: tensor of size k*d_y, where k is the number of labels, and d_y their dimension.
-        :param y_indices: indices of the labels amongst all labels of the dataset.
-        :param dataset_from: the dataset that the labels `y` live in.
-        :param label_distances: label distance matrix giving pairwise distances between labels within
-            the two datasets.
-        :return: tensor of size k*d_star, where d_star is the dimension of labels in self.dataset_star.
+        :param source_dataset: the dataset that the labels `y` live in.
+        :param aligned_target_dataset: target dataset, aligned to `source_dataset`.
+        :param source_label_distances: label distance matrix giving pairwise distances between labels within
+            the source dataset.
+        :param cross_label_distances: label distance matrix giving pairwise distances between labels from
+            source and target dataset.
+        :param potential: potential used in computing exponentials, if `self.label_method`=="plugin"
+            is used.
+        :return: tensor of size k*d^t, where d^t is the dimension of labels in self.target_dataset.
         """
-        if self.method == "match_label":
+        x = x if self.feature_dists else None
+        y = y if self.label_dists else None
+
+        if self.label_method == "masked_softmax":
             # define mask with (i,j)^th entry 1 iff the i^th label in the dataset is equal to the j^th label in y
             mask = torch.all(
-                (dataset_from.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
+                (source_dataset.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
             ).to(int)
-            dists = (
-                torch.cdist(
-                    dataset_from.features.view(dataset_from.features.shape[0], -1),
-                    x.view(x.shape[0], -1),
-                )
-                ** 2
+            exponentials = (
+                self.exponential_matrix(source_dataset, x, y, source_label_distances)
+                * mask
             )
-            dists /= dists.mean(0)
-            exponentials = torch.exp(-self.temperature * dists) * mask
+            labels = aligned_target_dataset.high_dim_labels
 
-        elif self.method == "all_samples":
-            # matrix of size len(dataset_from)*len(y), where entries are distances between labels
-            label_distances = label_distances[dataset_from.label_indices, :][
-                :, y_indices
-            ]
-            dists = (
-                torch.cdist(
-                    dataset_from.features.view(dataset_from.features.shape[0], -1),
-                    x.view(x.shape[0], -1),
-                )
-                ** 2
-                - self.eta * label_distances
+        elif self.label_method == "plain_softmax":
+            exponentials = self.exponential_matrix(
+                source_dataset, x, y, source_label_distances
             )
-            dists /= dists.mean(0)
-            exponentials = torch.exp(-self.temperature * dists)
+            labels = aligned_target_dataset.high_dim_labels
 
-        elif self.method == "all_features":
-            dists = (
-                torch.cdist(
-                    dataset_from.features.view(dataset_from.features.shape[0], -1),
-                    x.view(x.shape[0], -1),
-                )
-                ** 2
+        elif self.label_method == "plugin":
+            exponentials = self.exponential_matrix(
+                self.target_dataset, x, y, cross_label_distances, potential
             )
-            dists /= dists.mean(0)
-            exponentials = torch.exp(-self.temperature * dists)
-
-        elif self.method == "all_labels":
-            label_distances = label_distances[dataset_from.label_indices, :][
-                :, y_indices
-            ]
-            exponentials = torch.exp(-label_distances)
+            labels = self.target_dataset.high_dim_labels
 
         else:
             raise ValueError(
-                f"Method {self.method} not implemented! "
-                f"Choose one of 'match_label', 'all_samples', or 'all_features'."
+                "`self.label_method` must be set to one of the following:"
+                "`plain_softmax`, `masked_softmax`, or `plugin`."
             )
 
-        transported_y = (
-            self.dataset_star.labels
-            if self.dataset_star.high_dim_labels is None
-            else self.dataset_star.high_dim_labels
-        )
-        weighted_transported_labels = torch.matmul(transported_y.T, exponentials)
-        normalized_transported_labels = (
-            weighted_transported_labels / exponentials.sum(dim=0)
-        ).T
+        weighted_labels = labels.T @ exponentials
+        normalized_labels = weighted_labels / exponentials.sum(dim=0)
 
-        return normalized_transported_labels
+        return normalized_labels.T
+
+    def exponential_matrix(
+        self, dataset, x=None, y=None, label_distances=None, potential=None
+    ):
+        """
+        Compute a matrix of pairwise distances between samples, used in transporting
+        labels and features between datasets.
+        :param dataset: Dataset to which the distances of `x` and `y` are computed.
+        :param x: Sample features. If None, only sample labels are considered in distance.
+        :param y: Sample labels. If None, only sample features are considered in distance.
+        :param label_distances: pairwise distance matrix between labels, used for computing
+            distances between labels `y` and labels in `dataset`. 2-dimensional tensor,
+            where first dimension is the number of labels in the dataset of `y`, and the
+            second dimension is the number of labels in `dataset`.
+        :param potential: Dual OT potential. If given, computes a dual-plugin estimate
+            of the costs (see "Entropic estimation of optimal transport maps" paper).
+        :return: Cost matrix.
+        """
+        num_samples = x.shape[0] if x is not None else y.shape[0]
+        dists = torch.zeros((dataset.features.shape[0], num_samples))
+        if x is not None:
+            dists += (
+                torch.cdist(
+                    dataset.features.view(dataset.features.shape[0], -1),
+                    x.view(x.shape[0], -1),
+                )
+                ** 2
+            )
+        if y is not None:
+            label_distances = label_distances.T @ y.T
+            label_distances = dataset.high_dim_labels @ label_distances
+            dists += self.eta * label_distances
+        if potential is not None:
+            dists = potential.unsqueeze(1) - dists
+            dists /= self.reg
+            dists = torch.exp(dists)
+        else:
+            dists /= dists.mean(0)
+            dists = -self.temperature * dists
+            dists = torch.exp(dists)
+        return dists
 
 
-def compute_label_distances(dataset_1, dataset_2):
+def compute_label_distances(
+    dataset_1, dataset_2, ot_dists=False, samples_per_label=100
+):
     """
     Compute the pairwise distances between labels in `dataset_1` and `dataset_2` via
         the squared Wasserstein-2 distance between the feature distributions of those labels.
     :param dataset_1: first dataset with k labels.
     :param dataset_2: second dataset with l labels.
+    :param ot_dists: if True, uses OT distances between feature samples instead of Euclidean distances.
+    :param samples_per_label: maximum number of samples per label used in computing
+        pairwise OT distances, in order to reduce runtime.
     :return: k*l label distance matrix containing squared Wasserstein-2 distances.
     """
     labels_1 = dataset_1.unique_labels
@@ -374,16 +462,55 @@ def compute_label_distances(dataset_1, dataset_2):
         for j in range(len(labels_2)):
             features_1 = dataset_1.get_samples_by_label(labels_1[i])[0]
             features_2 = dataset_2.get_samples_by_label(labels_2[j])[0]
-            mu = torch.ones(len(features_1)) / len(features_1)
-            nu = torch.ones(len(features_2)) / len(features_2)
-            cost = (
-                torch.cdist(
-                    features_1.view(features_1.shape[0], -1),
-                    features_2.view(features_2.shape[0], -1),
+            nb_samples_1 = len(features_1)
+            nb_samples_2 = len(features_2)
+            features_1 = features_1.view(features_1.shape[0], -1)
+            features_2 = features_2.view(features_2.shape[0], -1)
+            dim_1 = features_1.shape[1]
+            dim_2 = features_2.shape[1]
+            if ot_dists == False:
+                mu = torch.ones(nb_samples_1) / nb_samples_1
+                nu = torch.ones(nb_samples_2) / nb_samples_2
+                distances = (
+                    torch.cdist(
+                        features_1,
+                        features_2,
+                    )
+                    ** 2
                 )
-                ** 2
-            )
-            transport_cost = ot.emd2(mu, nu, cost)
+                distances /= distances.max()
+            else:  # computes pairwise entropic OT distances between features
+                mu = torch.ones(samples_per_label) / samples_per_label
+                nu = torch.ones(samples_per_label) / samples_per_label
+                assert dim_1 == dim_2, "feature dimensions must match!"
+                features_1 = features_1[:samples_per_label]
+                features_2 = features_2[:samples_per_label]
+                features_1 -= features_1.min()
+                features_1 += 1e-3
+                features_1 /= features_1.sum(dim=1).unsqueeze(1)
+                features_2 -= features_2.min()
+                features_2 += 1e-3
+                features_2 /= features_2.sum(dim=1).unsqueeze(1)
+                width = int(math.sqrt(dim_1))
+                cost = euclidean_cost_matrix(width, width)
+                cost /= cost.max()
+                source_indices = torch.arange(samples_per_label).repeat_interleave(
+                    samples_per_label
+                )
+                source_dists = features_1[source_indices]
+                target_dists = features_2.repeat((samples_per_label, 1)).view(-1, dim_2)
+                distances = sinkhorn(
+                    source_dists,
+                    target_dists,
+                    cost,
+                    0.01,
+                    200,
+                    normThr=1e-4,
+                    tens_type=torch.float32,
+                )["cost"].reshape((samples_per_label, samples_per_label))
+                distances /= distances.max()
+
+            transport_cost = ot.emd2(mu, nu, distances)
             label_distances[i][j] = transport_cost
     return label_distances
 
