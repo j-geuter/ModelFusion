@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import numpy as np
 
-
 def plot_images(images):
     # Assuming images is an array of shape (n, 1, d, d)
     if images.dim() == 4:

@@ -13,26 +13,28 @@ from utils import class_correspondences
 
 TRAIN_DATASET = "mnist"  # `mnist`, `usps`, or `fashion`. The dataset on which a trained model is given
 TEST_DATASET = (
-    "fashion"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
+    "usps"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
 )
 BATCH_SIZE = 64
-NUM_SAMPLES = 2500  # number of training samples used in the transport plan
+NUM_SAMPLES = 7000  # number of training samples used in the transport plan
 NUM_TEST_SAMPLES = 2500  # number of test samples
 RESIZE_USPS = True  # if True, resizes usps images to 28*28
 REGULARIZER = None  # Regularizer for entropic OT problem. If set to None, computes unregularized plan
-TEMPERATURE = 100  # temperature for the TransportNN plug-in estimations of OT maps
-FEATURE_METHOD = "plain_softmax"  # TransportNN method for transporting features from target to source
+TEMPERATURE = 100 # temperature for the TransportNN plug-in estimations of OT maps
+FEATURE_METHOD = "plain_softmax"  # one of plain_softmax, plugin
 LABEL_METHOD = (
-    "plain_softmax"  # TransportNN method for transporting labels from source to target
+    "plain_softmax"  # one of plain_softmax, masked_softmax, plugin
 )
+FEATURE_DIST = True  # whether to use feature distances for label transport
+LABEL_DIST = True  # whether to use label distances for label transport
 OTDD_COST = (
     True  # if True, the cost between source_datasets takes label distances into account
 )
+LABEL_DIST_COEFF = 1 # controls how much the label distances contribute to the overall transport
+                     # cost; 1 means both label and feature dists contribute equally
 PROJECT_LABELS = (
-    True  # if True, projects label predictions on source dataset space before transport
+    False  # if True, projects label predictions on source dataset space before transport
 )
-FEATURE_DIST = True  # if True, use feature distances in computing sample distances when transporting labels
-LABEL_DIST = True  # if True, use label distances in computing sample distances when transporting labels
 
 torch.manual_seed(42)
 
@@ -180,13 +182,15 @@ else:
 cost /= cost.max()
 
 if OTDD_COST:
-    label_distances = compute_label_distances(
-        train_source_dataset, train_target_dataset
-    )
+    #label_distances = compute_label_distances(
+    #    train_source_dataset, train_target_dataset
+    #)
+    label_distances = torch.ones((10, 10)) - torch.eye(10)
+    label_distances /= label_distances.max()
     label_distances = label_distances[train_source_dataset.labels.squeeze(), :][
         :, train_target_dataset.labels.squeeze()
     ]
-    cost += label_distances
+    cost += LABEL_DIST_COEFF * label_distances
     cost /= cost.max()
 
 

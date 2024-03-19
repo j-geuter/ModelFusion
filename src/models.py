@@ -248,6 +248,7 @@ class TransportNN(nn.Module):
             model(samples.view(samples.shape[0], 1, model.dim, model.dim))
             for model, samples in zip(self.models, x_s)
         ]
+        y_s = [y.softmax(dim=1) for y in y_s]
 
         # project predictions to label set
         if self.project_source_labels:
@@ -478,7 +479,7 @@ def compute_label_distances(
                     )
                     ** 2
                 )
-                distances /= distances.max()
+                # distances /= distances.max()
             else:  # computes pairwise entropic OT distances between features
                 mu = torch.ones(samples_per_label) / samples_per_label
                 nu = torch.ones(samples_per_label) / samples_per_label
