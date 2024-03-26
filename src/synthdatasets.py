@@ -26,7 +26,9 @@ class CustomDataset(Dataset):
         self.label_dim = labels.shape[1:]
 
         # Find unique labels and save them as an attribute
-        unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True).to(device)
+        unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True)
+        unique_labels = unique_labels.to(device)
+        label_counts = label_counts.to(device)
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
@@ -57,7 +59,9 @@ class CustomDataset(Dataset):
         _, self.label_dim = new_labels.shape
         unique_labels, label_counts = torch.unique(
             new_labels, dim=0, return_counts=True
-        ).to(device)
+        )
+        unique_labels = unique_labels.to(device)
+        label_counts = label_counts.to(device)
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
