@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import numpy as np
 
+
 def plot_images(images):
     # Assuming images is an array of shape (n, 1, d, d)
     if images.dim() == 4:
@@ -42,63 +43,29 @@ def plot_images(images):
     plt.show()
 
 
-def class_correspondences(dataset_1, dataset_2, plan=None, symmetric=True, plot=True):
-    """
-    Compute class correspondences of a transport plan `plan` between
-        `dataset_1` and `dataset_2`. This returns a matrix of size
-        #classes(dataset_1) * #classes(dataset_2), where each entry
-        corresponds to what percentage of that class from `dataset_1`
-        is mapped to the respective class in `dataset_2` by the plan.
-        If `symmetric` is True, instead computes the average value across
-        both directions (from `dataset_1` to `dataset_2` and vice versa).
-    :param dataset_1: First dataset.
-    :param dataset_2: Second dataset.
-    :param plan: Transport plan. If None, assumes that the source_datasets are already
-        aligned according to the plan. Otherwise, aligns `dataset_2` according
-        to the plan.
-    :param symmetric: If True, symmetrizes the values.
-    :param plot: If True, plots the matrix with a heat map.
-    :return: Matrix containing class correspondences.
-    """
-    nb_samples_1, nb_samples_2 = dataset_1.num_samples, dataset_2.num_samples
-    assert (
-        nb_samples_1 == nb_samples_2
-    ), "For now only implemented for equal number of samples"
-    if plan is not None:
-        nonzero_indices = torch.nonzero(plan)
-        rows, permutation = nonzero_indices.unbind(1)
-        aligned_dataset_2 = deepcopy(dataset_2)
-        aligned_dataset_2.permute_data(permutation)
-    else:
-        aligned_dataset_2 = dataset_2
-    indices = (
-        dataset_1.label_indices * aligned_dataset_2.num_unique_labels
-        + aligned_dataset_2.label_indices
+def class_correspondences(dataset_1, dataset_2, plan, symmetric=False, plot=True):
+    correspondences = torch.zeros(
+        (dataset_1.num_unique_labels, dataset_2.num_unique_labels)
     )
-    occurrences = torch.bincount(
-        indices,
-        minlength=dataset_1.num_unique_labels * aligned_dataset_2.num_unique_labels,
-    )
-    occurrences = occurrences.reshape(
-        dataset_1.num_unique_labels, aligned_dataset_2.num_unique_labels
-    )
-    normalize = occurrences.sum(dim=1).unsqueeze(1)
-    normalize[normalize == 0] = 1  # avoid division by zero in the normalizing step
-    occurrences = occurrences / normalize
+    indices_1 = [dataset_1.get_samples_by_label(l)[1] for l in dataset_1.unique_labels]
+    indices_2 = [dataset_2.get_samples_by_label(l)[1] for l in dataset_2.unique_labels]
+    for i, idx1 in enumerate(indices_1):
+        for j, idx2 in enumerate(indices_2):
+            correspondence = plan[idx1, :][:, idx2]
+            correspondences[i][j] = correspondence.sum().item()
+    correspondences /= correspondences.sum(dim=1)[:, None]
     if symmetric:
-        occurrences = (
-            occurrences
-            + class_correspondences(
-                aligned_dataset_2, dataset_1, plan=None, symmetric=False, plot=False
-            )
-        ) / 2
+        correspondences += class_correspondences(
+            dataset_2, dataset_1, plan.T, symmetric=False, plot=False
+        )
+        correspondences /= 2
     if plot:
-        plt.imshow(occurrences.numpy(), cmap="viridis", interpolation="nearest")
+        plt.imshow(correspondences)
         plt.xlabel("Classes of dataset 2")
         plt.ylabel("Classes of dataset 1")
         plt.title("Class correspondences according to transport plan")
         plt.show()
-    return occurrences
+    return correspondences
 
 
 def models_equal(model1, model2, tolerance=1e-5):

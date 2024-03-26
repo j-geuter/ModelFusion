@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from synthdatasets import CustomDataset
 from costmatrix import euclidean_cost_matrix
 from sinkhorn import sinkhorn
+from utils import class_correspondences
 
 
 class TemperatureScaledSoftmax(nn.Module):
@@ -124,7 +125,10 @@ class TransportNN(nn.Module):
             domain. One of "plain_softmax" (softmax with distances in source domain),
             "masked_softmax" (softmax only over samples with matching label; should only be
             used in conjunction with `project_source_labels`==True); or
-            "plugin" (softmax using the dual potential and cross-dataset distances).
+            "plugin" (softmax using the dual potential and cross-dataset distances); or
+            "label_correspondences" (does not transport labels back to target space, but computes
+            predictions from soft labels in source space, by comparing against the label correspondences
+            given by the transport plan between the train datasets).
         :param feature_dists: Toggles whether to use feature distances in computing cost for label transport.
         :param label_dists: Toggles whether to use label distances in computing cost for label transport.
         :param project_source_labels: if True, projects labels onto hard labels in source dataset space;
@@ -170,6 +174,7 @@ class TransportNN(nn.Module):
 
         if isinstance(plans, torch.Tensor):
             plans = [plans]
+        self.plans = tuple(plans)
         aligned_source_datasets = []
         aligned_target_datasets = []
         for plan, dataset in zip(plans, source_datasets):
@@ -220,6 +225,15 @@ class TransportNN(nn.Module):
             ]
         )
 
+        self.label_correspondences = tuple(
+            [
+                class_correspondences(
+                    dataset, self.target_dataset, plan=plan, symmetric=False, plot=False
+                )
+                for dataset, plan in zip(self.source_datasets, plans)
+            ]
+        )
+
         self.direct_interpolation = (
             False  # if True, compute predictions by interpolating between
         )
@@ -267,8 +281,9 @@ class TransportNN(nn.Module):
                 source_label_distances,
                 cross_label_distances,
                 potential,
+                label_correspondences,
             )
-            for features, y, dataset, aligned_target_dataset, source_label_distances, cross_label_distances, potential in zip(
+            for features, y, dataset, aligned_target_dataset, source_label_distances, cross_label_distances, potential, label_correspondences in zip(
                 x_s,
                 y_s,
                 self.source_datasets,
@@ -276,6 +291,7 @@ class TransportNN(nn.Module):
                 self.source_label_distances,
                 self.cross_label_distances,
                 self.g,
+                self.label_correspondences,
             )
         ]
         y_t = sum(y_t) / len(y_t)
@@ -349,6 +365,7 @@ class TransportNN(nn.Module):
         source_label_distances,
         cross_label_distances,
         potential,
+        label_correspondences,
     ):
         """
         Transports labels `y` from `source_dataset` back onto self.target_dataset using the transport map.
@@ -362,6 +379,8 @@ class TransportNN(nn.Module):
             source and target dataset.
         :param potential: potential used in computing exponentials, if `self.label_method`=="plugin"
             is used.
+        :param label_correspondences: matrix containing correspondences between labels. Can e.g. be the OT plan
+            between labels with cost being the distance between labels.
         :return: tensor of size k*d^t, where d^t is the dimension of labels in self.target_dataset.
         """
         x = x if self.feature_dists else None
@@ -390,16 +409,21 @@ class TransportNN(nn.Module):
             )
             labels = self.target_dataset.high_dim_labels
 
+        elif self.label_method == "label_correspondences":
+            target_labels = label_correspondences.T @ (y.T)
+            target_labels = target_labels.T
+            return target_labels
+
         else:
             raise ValueError(
                 "`self.label_method` must be set to one of the following:"
-                "`plain_softmax`, `masked_softmax`, or `plugin`."
+                "`plain_softmax`, `masked_softmax`, `label_correspondences`, or `plugin`."
             )
 
         weighted_labels = labels.T @ exponentials
         normalized_labels = weighted_labels / exponentials.sum(dim=0)
 
-        return normalized_labels.T
+        return normalized_labels.T.softmax(dim=1)
 
     def exponential_matrix(
         self, dataset, x=None, y=None, label_distances=None, potential=None
@@ -500,15 +524,13 @@ def compute_label_distances(
                 )
                 source_dists = features_1[source_indices]
                 target_dists = features_2.repeat((samples_per_label, 1)).view(-1, dim_2)
-                distances = sinkhorn(
+                distances = ot.sinkhorn(
                     source_dists,
                     target_dists,
                     cost,
                     0.01,
-                    200,
-                    normThr=1e-4,
-                    tens_type=torch.float32,
-                )["cost"].reshape((samples_per_label, samples_per_label))
+                    numItermax=200,
+                ).reshape((samples_per_label, samples_per_label))
                 distances /= distances.max()
 
             transport_cost = ot.emd2(mu, nu, distances)
