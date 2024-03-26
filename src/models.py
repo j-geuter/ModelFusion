@@ -469,7 +469,7 @@ class TransportNN(nn.Module):
 
 
 def compute_label_distances(
-    dataset_1, dataset_2, ot_dists=False, samples_per_label=100
+    dataset_1, dataset_2, ot_dists=False, samples_per_label=100, eps=0.01, max_iter=200
 ):
     """
     Compute the pairwise distances between labels in `dataset_1` and `dataset_2` via
@@ -533,8 +533,8 @@ def compute_label_distances(
                     source_dists,
                     target_dists,
                     cost,
-                    0.01,
-                    max_iter=200,
+                    eps,
+                    max_iter=max_iter,
                 )['cost'].reshape((samples_per_label, samples_per_label)).to(device)
                 distances /= distances.max()
 
