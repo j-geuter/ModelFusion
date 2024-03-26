@@ -535,7 +535,7 @@ def compute_label_distances(
                     cost,
                     0.01,
                     max_iter=200,
-                ).reshape((samples_per_label, samples_per_label)).to(device)
+                )['plan'].reshape((samples_per_label, samples_per_label)).to(device)
                 distances /= distances.max()
 
             transport_cost = ot.emd2(mu, nu, distances)
