@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import numpy as np
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def plot_images(images):
     # Assuming images is an array of shape (n, 1, d, d)
@@ -46,7 +47,7 @@ def plot_images(images):
 def class_correspondences(dataset_1, dataset_2, plan, symmetric=False, plot=True):
     correspondences = torch.zeros(
         (dataset_1.num_unique_labels, dataset_2.num_unique_labels)
-    )
+    ).to(device)
     indices_1 = [dataset_1.get_samples_by_label(l)[1] for l in dataset_1.unique_labels]
     indices_2 = [dataset_2.get_samples_by_label(l)[1] for l in dataset_2.unique_labels]
     for i, idx1 in enumerate(indices_1):

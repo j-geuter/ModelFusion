@@ -17,6 +17,8 @@ class CustomDataset(Dataset):
         :param low_dim_labels: Set to True if the labels are low dimensional,
             e.g. digits. Set to False if labels are high-dimensional, e.g. one-hot-vectors.
         """
+        features = features.to(device)
+        labels = labels.to(device)
         self.features = features
         if labels.dim() == 1:
             labels = labels.unsqueeze(1)
@@ -55,6 +57,7 @@ class CustomDataset(Dataset):
 
     @labels.setter
     def labels(self, new_labels):
+        new_labels = new_labels.to(device)
         self._labels = new_labels
         _, self.label_dim = new_labels.shape
         unique_labels, label_counts = torch.unique(
