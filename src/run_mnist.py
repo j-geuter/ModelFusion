@@ -12,6 +12,8 @@ from models import SimpleCNN, TransportNN, compute_label_distances
 from train_mnist import test_accuracy
 from utils import class_correspondences, plot_images
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 TRAIN_DATASET = "mnist"  # `mnist`, `usps`, or `fashion`. The dataset on which a trained model is given
 TEST_DATASET = (
     "fashion"  # `mnist`, `usps`, or `fashion` The dataset on which we want to test
@@ -107,13 +109,13 @@ elif TEST_DATASET == "usps":
         )
         resized_train_target_features = torch.cat(
             [resized_train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
-        )
+        ).to(device)
         resized_train_target_labels = torch.tensor(
             [resized_train_target_dataset[i][1] for i in range(NUM_SAMPLES)]
-        )
+        ).to(device)
         resized_train_target_dataset = CustomDataset(
             resized_train_target_features, resized_train_target_labels
-        )
+        ).to(device)
 
 
 else:
@@ -121,16 +123,16 @@ else:
 
 train_source_features = torch.cat(
     [train_source_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
-)
+).to(device)
 train_source_labels = torch.tensor(
     [train_source_dataset[i][1] for i in range(NUM_SAMPLES)]
-)
+).to(device)
 train_target_features = torch.cat(
     [train_target_dataset[i][0] for i in range(NUM_SAMPLES)], dim=0
-)
+).to(device)
 train_target_labels = torch.tensor(
     [train_target_dataset[i][1] for i in range(NUM_SAMPLES)]
-)
+).to(device)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 train_source_dataset = CustomDataset(train_source_features, train_source_labels)
@@ -144,7 +146,7 @@ else:
     location = f"./models/{TRAIN_DATASET}.pth"
 
 input_dim = 28 if RESIZE_USPS or TRAIN_DATASET != "usps" else 16
-model = SimpleCNN(dim=input_dim, location=location)
+model = SimpleCNN(dim=input_dim, location=location).to(device)
 
 try:
     acc = test_accuracy(model, test_loader)
@@ -153,7 +155,9 @@ except Exception as e:
     print(f"Cannot test model on target dataset; dimensions do not match. Error: {e}")
 
 mu = torch.ones(train_source_dataset.num_samples) / train_source_dataset.num_samples
+mu = mu.to(device)
 nu = torch.ones(train_target_dataset.num_samples) / train_target_dataset.num_samples
+nu = nu.to(device)
 if TEST_DATASET == "usps" and not RESIZE_USPS:
     cost = (
         torch.cdist(
@@ -165,7 +169,7 @@ if TEST_DATASET == "usps" and not RESIZE_USPS:
             ),
         )
         ** 2
-    )
+    ).to(device)
 else:
     cost = (
         torch.cdist(
@@ -177,7 +181,7 @@ else:
             ),
         )
         ** 2
-    )
+    ).to(device)
 cost /= cost.max()
 
 if OTDD_COST:
@@ -263,8 +267,8 @@ test_acc = test_accuracy(transportNN, test_loader, max_samples=NUM_TEST_SAMPLES)
 print(f"TransportNN accuracy on test set: {test_acc}")
 
 x, labels = next(iter(test_loader))
-x = x[:16]
-labels = labels[:16]
+x = x[:16].to(device)
+labels = labels[:16].to(device)
 x = x.squeeze(1)
 x = x.view(x.shape[0], -1)
 self = transportNN
@@ -281,10 +285,12 @@ print(f"Plan-summed correspondences: {acc}")
 
 l1 = torch.ones(10) / 10
 l2 = torch.ones(10) / 10
+l1 = l1.to(device)
+l2 = l2.to(device)
 L = label_distances
-T0 = ot.emd(l1, l2, L)
-T01 = ot.sinkhorn(l1, l2, L, 0.1, numItermax=100000)
-T001 = ot.sinkhorn(l1, l2, L, 0.01, numItermax=100000)
+T0 = ot.emd(l1, l2, L).to(device)
+T01 = ot.sinkhorn(l1, l2, L, 0.1, numItermax=100000).to(device)
+T001 = ot.sinkhorn(l1, l2, L, 0.01, numItermax=100000).to(device)
 
 for i, plan in enumerate([T0, T01, T001]):
     transportNN.label_correspondences = (plan,)

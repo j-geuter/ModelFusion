@@ -11,6 +11,7 @@ from costmatrix import euclidean_cost_matrix
 from sinkhorn import sinkhorn
 from utils import class_correspondences
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TemperatureScaledSoftmax(nn.Module):
     def __init__(self, temperature):
@@ -313,9 +314,9 @@ class TransportNN(nn.Module):
                 x.view(x.shape[0], -1),
             )
             ** 2
-        )
+        ).to(device)
         dists /= dists.mean(0)  # normalizes distances to avoid NaNs
-        exponentials = torch.exp(-self.temperature * dists)
+        exponentials = torch.exp(-self.temperature * dists).to(device)
         y = (
             self.target_dataset.labels
             if self.target_dataset.high_dim_labels is None
@@ -390,7 +391,7 @@ class TransportNN(nn.Module):
             # define mask with (i,j)^th entry 1 iff the i^th label in the dataset is equal to the j^th label in y
             mask = torch.all(
                 (source_dataset.labels.unsqueeze(1) == y.unsqueeze(0)), dim=2
-            ).to(int)
+            ).to(int).to(device)
             exponentials = (
                 self.exponential_matrix(source_dataset, x, y, source_label_distances)
                 * mask
@@ -443,7 +444,7 @@ class TransportNN(nn.Module):
         :return: Cost matrix.
         """
         num_samples = x.shape[0] if x is not None else y.shape[0]
-        dists = torch.zeros((dataset.features.shape[0], num_samples))
+        dists = torch.zeros((dataset.features.shape[0], num_samples)).to(device)
         if x is not None:
             dists += (
                 torch.cdist(
@@ -451,7 +452,7 @@ class TransportNN(nn.Module):
                     x.view(x.shape[0], -1),
                 )
                 ** 2
-            )
+            ).to(device)
         if y is not None:
             label_distances = label_distances.T @ y.T
             label_distances = dataset.high_dim_labels @ label_distances
@@ -482,7 +483,7 @@ def compute_label_distances(
     """
     labels_1 = dataset_1.unique_labels
     labels_2 = dataset_2.unique_labels
-    label_distances = torch.zeros((len(labels_1), len(labels_2)))
+    label_distances = torch.zeros((len(labels_1), len(labels_2))).to(device)
     for i in range(len(labels_1)):
         for j in range(len(labels_2)):
             features_1 = dataset_1.get_samples_by_label(labels_1[i])[0]
@@ -496,17 +497,21 @@ def compute_label_distances(
             if ot_dists == False:
                 mu = torch.ones(nb_samples_1) / nb_samples_1
                 nu = torch.ones(nb_samples_2) / nb_samples_2
+                mu = mu.to(device)
+                nu = nu.to(device)
                 distances = (
                     torch.cdist(
                         features_1,
                         features_2,
                     )
                     ** 2
-                )
+                ).to(device)
                 # distances /= distances.max()
             else:  # computes pairwise entropic OT distances between features
                 mu = torch.ones(samples_per_label) / samples_per_label
                 nu = torch.ones(samples_per_label) / samples_per_label
+                mu = mu.to(device)
+                nu = nu.to(device)
                 assert dim_1 == dim_2, "feature dimensions must match!"
                 features_1 = features_1[:samples_per_label]
                 features_2 = features_2[:samples_per_label]
@@ -517,20 +522,20 @@ def compute_label_distances(
                 features_2 += 1e-3
                 features_2 /= features_2.sum(dim=1).unsqueeze(1)
                 width = int(math.sqrt(dim_1))
-                cost = euclidean_cost_matrix(width, width)
+                cost = euclidean_cost_matrix(width, width).to(device)
                 cost /= cost.max()
                 source_indices = torch.arange(samples_per_label).repeat_interleave(
                     samples_per_label
-                )
+                ).to(device)
                 source_dists = features_1[source_indices]
-                target_dists = features_2.repeat((samples_per_label, 1)).view(-1, dim_2)
+                target_dists = features_2.repeat((samples_per_label, 1)).view(-1, dim_2).to(device)
                 distances = ot.sinkhorn(
                     source_dists,
                     target_dists,
                     cost,
                     0.01,
                     numItermax=200,
-                ).reshape((samples_per_label, samples_per_label))
+                ).reshape((samples_per_label, samples_per_label)).to(device)
                 distances /= distances.max()
 
             transport_cost = ot.emd2(mu, nu, distances)
@@ -542,7 +547,7 @@ def project_labels(preds, labels, high_dim_labels):
 
     # if predictions and labels have the same dimension
     if preds[0].shape == labels[0].shape:
-        dists = torch.cdist(preds, labels)
+        dists = torch.cdist(preds, labels).to(device)
         closest = torch.argmin(dists, dim=1)
         return labels[closest], closest
 
