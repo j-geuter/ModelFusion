@@ -6,6 +6,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def train(model, train_loader, test_loader, num_epochs=2):
     criterion = nn.CrossEntropyLoss()
@@ -13,6 +14,8 @@ def train(model, train_loader, test_loader, num_epochs=2):
     for epoch in range(num_epochs):
         model.train()
         for images, labels in train_loader:
+            images = images.to(device)
+            labels = labels.to(device)
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -38,6 +41,8 @@ def test_accuracy(model, data_loader, max_samples=torch.inf):
         total_iters = len(data_loader)
     with torch.no_grad():
         for images, labels in tqdm(data_loader, total=total_iters):
+            images = images.to(device)
+            labels = labels.to(device)
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
             total_correct += (predicted == labels).sum().item()
