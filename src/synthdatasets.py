@@ -26,7 +26,7 @@ class CustomDataset(Dataset):
         self.label_dim = labels.shape[1:]
 
         # Find unique labels and save them as an attribute
-        unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True)
+        unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True).to(device)
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
@@ -34,11 +34,11 @@ class CustomDataset(Dataset):
             torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
             .to(int)
             .argmax(dim=1)
-        )
+        ).to(device)
         if (
             low_dim_labels
         ):  # this means the labels are low dimensional, and will create high dimensional counterparts
-            self.high_dim_unique_labels = torch.eye(self.num_unique_labels)
+            self.high_dim_unique_labels = torch.eye(self.num_unique_labels).to(device)
             self.high_dim_labels = self.high_dim_unique_labels[self.label_indices]
         else:
             self.high_dim_labels = self.labels
@@ -57,7 +57,7 @@ class CustomDataset(Dataset):
         _, self.label_dim = new_labels.shape
         unique_labels, label_counts = torch.unique(
             new_labels, dim=0, return_counts=True
-        )
+        ).to(device)
         self.unique_labels = unique_labels
         self.label_counts = label_counts
         self.num_unique_labels = len(unique_labels)
@@ -65,7 +65,7 @@ class CustomDataset(Dataset):
             torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
             .to(int)
             .argmax(dim=1)
-        )
+        ).to(device)
 
     def permute_data(self, permutation):
         features, labels = self.features[permutation], self.labels[permutation]
