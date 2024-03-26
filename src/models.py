@@ -529,12 +529,12 @@ def compute_label_distances(
                 ).to(device)
                 source_dists = features_1[source_indices]
                 target_dists = features_2.repeat((samples_per_label, 1)).view(-1, dim_2).to(device)
-                distances = ot.sinkhorn(
+                distances = sinkhorn(
                     source_dists,
                     target_dists,
                     cost,
                     0.01,
-                    numItermax=200,
+                    max_iter=200,
                 ).reshape((samples_per_label, samples_per_label)).to(device)
                 distances /= distances.max()
 
