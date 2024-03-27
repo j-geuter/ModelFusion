@@ -131,14 +131,14 @@ def sinkhorn(
             ),
         ),
     )
-    cost = (gamma * C).sum(1).sum(1)
-    perc_nan = 100 * cost.isnan().sum() / len(cost)
-    if perc_nan > 0:
-        perc_nan = "%.2f" % perc_nan
-        logging.warning(f"{perc_nan}% of transport costs are NaN.")
+    #cost = (gamma * C).sum(1).sum(1)
+    #perc_nan = 100 * cost.isnan().sum() / len(cost)
+    #if perc_nan > 0:
+    #    perc_nan = "%.2f" % perc_nan
+    #    logging.warning(f"{perc_nan}% of transport costs are NaN.")
     if not log:
         return {
-            "cost": cost,
+            #"cost": cost,
             "plan": gamma.squeeze(),
             "iterations": it,
             "f": eps * torch.log(u).T,

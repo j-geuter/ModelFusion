@@ -18,35 +18,38 @@ class CustomDataset(Dataset):
             e.g. digits. Set to False if labels are high-dimensional, e.g. one-hot-vectors.
         """
         features = features.to(device)
-        labels = labels.to(device)
+        if labels is not None: # labels can be set to None to create an unlabeled dataset
+            labels = labels.to(device)
+            if labels.dim() == 1:
+                labels = labels.unsqueeze(1)
+            self._labels = labels
+            self.label_dim = labels.shape[1:]
+            # Find unique labels and save them as an attribute
+            unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True)
+            unique_labels = unique_labels.to(device)
+            label_counts = label_counts.to(device)
+            self.unique_labels = unique_labels
+            self.label_counts = label_counts
+            self.num_unique_labels = len(unique_labels)
+            self.label_indices = (
+                torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
+                .to(int)
+                .argmax(dim=1)
+            ).to(device)
+            if (
+                    low_dim_labels
+            ):  # this means the labels are low dimensional, and will create high dimensional counterparts
+                self.high_dim_unique_labels = torch.eye(self.num_unique_labels).to(device)
+                self.high_dim_labels = self.high_dim_unique_labels[self.label_indices]
+            else:
+                self.high_dim_labels = self.labels
+                self.high_dim_unique_labels = self.unique_labels
+        else:
+            self._labels = torch.zeros((len(features), 0))
         self.features = features
-        if labels.dim() == 1:
-            labels = labels.unsqueeze(1)
-        self._labels = labels
         self.num_samples, self.feature_dim = features.shape[0], features.shape[1:]
         self.flattened_feature_dim = features.view(self.num_samples, -1).shape[1:]
-        self.label_dim = labels.shape[1:]
 
-        # Find unique labels and save them as an attribute
-        unique_labels, label_counts = torch.unique(labels, dim=0, return_counts=True)
-        unique_labels = unique_labels.to(device)
-        label_counts = label_counts.to(device)
-        self.unique_labels = unique_labels
-        self.label_counts = label_counts
-        self.num_unique_labels = len(unique_labels)
-        self.label_indices = (
-            torch.all(self._labels[:, None, :] == self.unique_labels[None, :, :], dim=2)
-            .to(int)
-            .argmax(dim=1)
-        ).to(device)
-        if (
-            low_dim_labels
-        ):  # this means the labels are low dimensional, and will create high dimensional counterparts
-            self.high_dim_unique_labels = torch.eye(self.num_unique_labels).to(device)
-            self.high_dim_labels = self.high_dim_unique_labels[self.label_indices]
-        else:
-            self.high_dim_labels = self.labels
-            self.high_dim_unique_labels = self.unique_labels
 
     def __len__(self):
         return self.num_samples
@@ -75,7 +78,11 @@ class CustomDataset(Dataset):
         ).to(device)
 
     def permute_data(self, permutation):
-        features, labels = self.features[permutation], self.labels[permutation]
+        if self.labels.numel() > 0: # labels exist
+            features, labels = self.features[permutation], self.labels[permutation]
+        else:
+            features = self.features[permutation]
+            labels = None
         self.__init__(features, labels)
 
     def __getitem__(self, index):
@@ -83,7 +90,10 @@ class CustomDataset(Dataset):
 
     def get_samples_by_label(self, target_label, idx=None):
         # Given a target_label, return features of samples with that label and the indices
-        mask = torch.all(self._labels == target_label, dim=1)
+        if self.labels.numel() > 0:
+            mask = torch.all(self._labels == target_label, dim=1)
+        else:
+            mask = torch.tensor([False for _ in range(self.num_samples)])
         if idx is not None:
             mask[idx] = False
         return self.features[mask], torch.where(mask)[0]

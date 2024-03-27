@@ -92,7 +92,8 @@ class TransportNN(nn.Module):
         self,
         models,
         source_datasets,
-        target_dataset,
+        labeled_target_dataset,
+        unlabeled_target_dataset=None,
         plans=None,
         eta=1,
         feature_method="plain_softmax",
@@ -113,7 +114,8 @@ class TransportNN(nn.Module):
         :param models: iterable of models. Can also be a single model.
         :param source_datasets: iterable of source_datasets corresponding to `models`. Must be of
             same length. Can also be a single dataset.
-        :param target_dataset: This is the domain the model will be used on.
+        :param labeled_target_dataset: This is the domain the model will be used on.
+        :param unlabeled_target_dataset: Optional dataset with unlabeled target data.
         :param plans: Optional transport plan(s) - either a single plan, or a list of plans of the
             same length as `source_datasets`. If given, creates aligned versions of the source datasets
             and target dataset according to `plans`.
@@ -170,33 +172,42 @@ class TransportNN(nn.Module):
         self.reg = reg
         if isinstance(source_datasets, CustomDataset):
             source_datasets = [source_datasets]
-        self.target_dataset = target_dataset
+        self.labeled_target_dataset = labeled_target_dataset
+        self.unlabeled_target_dataset = unlabeled_target_dataset
+        if unlabeled_target_dataset is None:
+            self.complete_target_features_dataset = labeled_target_dataset
+        else:
+            complete_features = torch.cat((labeled_target_dataset.features, unlabeled_target_dataset.features), dim=0)
+            self.complete_target_features_dataset = CustomDataset(complete_features, None)
+        self.num_labeled_target_samples = len(labeled_target_dataset)
+        self.num_unlabeled_target_samples = len(unlabeled_target_dataset) if unlabeled_target_dataset is not None else 0
+        self.num_target_samples = self.num_labeled_target_samples + self.num_unlabeled_target_samples
         self.source_datasets = tuple(source_datasets)
 
         if isinstance(plans, torch.Tensor):
             plans = [plans]
         self.plans = tuple(plans)
         aligned_source_datasets = []
-        aligned_target_datasets = []
+        aligned_labeled_target_datasets = []
         for plan, dataset in zip(plans, source_datasets):
             # align target dataset
-            aligned_target_features = dataset.num_samples * torch.einsum(
-                "nl,lxy->nxy", plan, target_dataset.features
+            aligned_labeled_target_features = dataset.num_samples * torch.einsum(
+                "nl,lxy->nxy", plan[:, :self.num_labeled_target_samples], labeled_target_dataset.features
             )
             aligned_target_labels = dataset.num_samples * torch.matmul(
-                plan, target_dataset.high_dim_labels
+                plan[:, :self.num_labeled_target_samples], labeled_target_dataset.high_dim_labels
             )
-            aligned_target_datasets.append(
+            aligned_labeled_target_datasets.append(
                 CustomDataset(
-                    aligned_target_features, aligned_target_labels, low_dim_labels=False
+                    aligned_labeled_target_features, aligned_target_labels, low_dim_labels=False
                 )
             )
 
             # align source dataset
-            aligned_source_features = target_dataset.num_samples * torch.einsum(
+            aligned_source_features = self.num_target_samples * torch.einsum(
                 "nl,lxy->nxy", plan.T, dataset.features
             )
-            aligned_source_labels = target_dataset.num_samples * torch.matmul(
+            aligned_source_labels = self.num_target_samples * torch.matmul(
                 plan.T, dataset.high_dim_labels
             )
             aligned_source_datasets.append(
@@ -205,7 +216,7 @@ class TransportNN(nn.Module):
                 )
             )
         self.aligned_source_datasets = tuple(aligned_source_datasets)
-        self.aligned_target_datasets = tuple(aligned_target_datasets)
+        self.aligned_labeled_target_datasets = tuple(aligned_labeled_target_datasets)
 
         assert len(self.models) == len(
             self.source_datasets
@@ -221,7 +232,7 @@ class TransportNN(nn.Module):
 
         self.cross_label_distances = tuple(
             [
-                compute_label_distances(dataset, self.target_dataset)
+                compute_label_distances(dataset, self.labeled_target_dataset)
                 for dataset in self.source_datasets
             ]
         )
@@ -229,7 +240,7 @@ class TransportNN(nn.Module):
         self.label_correspondences = tuple(
             [
                 class_correspondences(
-                    dataset, self.target_dataset, plan=plan, symmetric=False, plot=False
+                    dataset, self.labeled_target_dataset, plan=plan[:, :self.num_labeled_target_samples], symmetric=False, plot=False
                 )
                 for dataset, plan in zip(self.source_datasets, plans)
             ]
@@ -288,7 +299,7 @@ class TransportNN(nn.Module):
                 x_s,
                 y_s,
                 self.source_datasets,
-                self.aligned_target_datasets,
+                self.aligned_labeled_target_datasets,
                 self.source_label_distances,
                 self.cross_label_distances,
                 self.g,
@@ -300,7 +311,7 @@ class TransportNN(nn.Module):
 
     def interpolate(self, x):
         """
-        Computes predictions in `target_dataset` space by interpolating between samples.
+        Computes predictions in target dataset space by interpolating between samples.
         This is independent of the model or `self.source_datasets`, is learning-free, and serves
         as a baseline for more sophisticated prediction algorithms.
         :param x: input.
@@ -308,8 +319,8 @@ class TransportNN(nn.Module):
         """
         dists = (
             torch.cdist(
-                self.target_dataset.features.view(
-                    self.target_dataset.features.shape[0], -1
+                self.labeled_target_dataset.features.view(
+                    self.labeled_target_dataset.features.shape[0], -1
                 ),
                 x.view(x.shape[0], -1),
             )
@@ -318,9 +329,9 @@ class TransportNN(nn.Module):
         dists /= dists.mean(0)  # normalizes distances to avoid NaNs
         exponentials = torch.exp(-self.temperature * dists).to(device)
         y = (
-            self.target_dataset.labels
-            if self.target_dataset.high_dim_labels is None
-            else self.target_dataset.high_dim_labels
+            self.labeled_target_dataset.labels
+            if self.labeled_target_dataset.high_dim_labels is None
+            else self.labeled_target_dataset.high_dim_labels
         )
         weighted_labels = torch.matmul(y.T, exponentials)
         normalized_labels = (weighted_labels / exponentials.sum(dim=0)).T
@@ -337,7 +348,7 @@ class TransportNN(nn.Module):
         :return: feature tensor of size k*d_x', where d_x' is the dimension of features in `dataset_to`.
         """
         if self.feature_method == "plain_softmax":
-            exponentials = self.exponential_matrix(self.target_dataset, x)
+            exponentials = self.exponential_matrix(self.complete_target_features_dataset, x)
             features = aligned_dataset.features.view(
                 aligned_dataset.features.shape[0], -1
             )
@@ -406,9 +417,9 @@ class TransportNN(nn.Module):
 
         elif self.label_method == "plugin":
             exponentials = self.exponential_matrix(
-                self.target_dataset, x, y, cross_label_distances, potential
+                self.labeled_target_dataset, x, y, cross_label_distances, potential
             )
-            labels = self.target_dataset.high_dim_labels
+            labels = self.labeled_target_dataset.high_dim_labels
 
         elif self.label_method == "label_correspondences":
             target_labels = label_correspondences.T @ (y.T)
@@ -542,6 +553,17 @@ def compute_label_distances(
             label_distances[i][j] = transport_cost
     return label_distances
 
+
+def compute_feature_distances(features_1, features_2, eps=0.01, max_iter=200, num_parallel=500):
+    """
+    Compute W^2_2 distances between feature vectors using Sinkhorn.
+    :param features_1: feature matrix of shape (n_1, d).
+    :param features_2: feature matrix of shape (n_2, d).
+    :param eps: Regularizer for Sinkhorn.
+    :param max_iter: Number of iterations for Sinkhorn.
+    :param num_parallel: Number of problems to run in parallel.
+    :return: distance matrix of shape (n_1, n_2) containing the W^2_2 distances between features.
+    """
 
 def project_labels(preds, labels, high_dim_labels):
 
