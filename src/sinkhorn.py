@@ -1,6 +1,7 @@
 import torch
 from logger import logging
 from tqdm import tqdm
+import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -20,9 +21,10 @@ def sinkhorn(
     min_start=None,
     max_start=None,
     show_progress_bar=True,
+    memory_num=None
 ):
     """
-    Sinkhorn's algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
+    Sinkhorn algorithm to compute the dual potentials and the dual problem value. Allows for parallelization.
     :param d1: source distribution(s). Two-dimensional tensor where first dimension corresponds to number of samples and second dimension to sample size. Can also be 1D for a single sample.
     :param d2: target distribution(s). Two-dimensional tensor as above.
     :param C: cost matrix. Two-dimensional tensor.
@@ -37,13 +39,16 @@ def sinkhorn(
     :param min_start: if given, sets all entries in the starting vector smaller than `min_start` equal to `min_start`.
     :param max_start: if given, sets all entries in the starting vector larger than `max_start` equal to `max_start`.
     :param show_progress_bar: if True, shows a progress bar.
+    :param memory_num: if set to an integer, only computes `memory_num` transport plans from potentials at once to reduce memory consumption.
     :return: A dict with keys 'cost' (transport costs), 'plan' (transport plans), 'iterations' (number of iterations),
         'f' (first dual potential), 'g' (second dual potential),
         'u' (first scaling vector), 'v' (second scaling vector),
         'avgMCV' (average marginal constraint violations, only returned if `log`==True).
     """
+    num_samples = len(d1)
     mu = d1.clone().to(device)
     nu = d2.clone().to(device)
+    C = C.to(tens_type).to(device)
     if mu.dim() == 1:
         mu = mu[None, :]
     if nu.dim() == 1:
@@ -122,30 +127,61 @@ def sinkhorn(
                         f"Accuracy below threshold. Early termination after {it} iterations."
                     )
                 break
-    gamma = torch.matmul(
-        torch.cat([torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]),
-        torch.matmul(
-            K,
-            torch.cat(
-                [torch.diag(v.T[j]).to(device)[None, :] for j in range(u.size(1))]
+    if memory_num is not None:
+        cost = torch.zeros(num_samples).to(tens_type).to(device)
+        for i in range(math.ceil(num_samples / memory_num)):
+
+            # compute this iteration's number of samples
+            if i == num_samples // memory_num:
+                n = num_samples - memory_num * (num_samples//memory_num)
+            else:
+                n = memory_num
+            gamma = torch.matmul(
+                torch.cat([torch.diag(u.T[j + i * memory_num]).to(device)[None, :] for j in range(n)]),
+                torch.matmul(
+                    K,
+                    torch.cat(
+                        [torch.diag(v.T[j + i * memory_num]).to(device)[None, :] for j in range(n)]
+                    ),
+                ),
+            )
+            cost[i*memory_num:i*memory_num+n] = (gamma * C).sum(1).sum(1)
+
+    else:
+        gamma = torch.matmul(
+            torch.cat([torch.diag(u.T[j]).to(device)[None, :] for j in range(u.size(1))]),
+            torch.matmul(
+                K,
+                torch.cat(
+                    [torch.diag(v.T[j]).to(device)[None, :] for j in range(u.size(1))]
+                ),
             ),
-        ),
-    )
-    #cost = (gamma * C).sum(1).sum(1)
-    #perc_nan = 100 * cost.isnan().sum() / len(cost)
-    #if perc_nan > 0:
-    #    perc_nan = "%.2f" % perc_nan
-    #    logging.warning(f"{perc_nan}% of transport costs are NaN.")
+        )
+        cost = (gamma * C).sum(1).sum(1)
+    perc_nan = 100 * cost.isnan().sum() / len(cost)
+    if perc_nan > 0:
+        perc_nan = "%.2f" % perc_nan
+        logging.warning(f"{perc_nan}% of transport costs are NaN.")
     if not log:
-        return {
-            #"cost": cost,
-            "plan": gamma.squeeze(),
-            "iterations": it,
-            "f": eps * torch.log(u).T,
-            "g": eps * torch.log(v).T,
-            "u": u.T,
-            "v": v.T,
-        }
+        if memory_num is None:
+            return {
+                "cost": cost,
+                "plan": gamma.squeeze(),
+                "iterations": it,
+                "f": eps * torch.log(u).T,
+                "g": eps * torch.log(v).T,
+                "u": u.T,
+                "v": v.T,
+            }
+        else: # do not compute transport plans for memory efficiency
+            return {
+                "cost": cost,
+                "iterations": it,
+                "f": eps * torch.log(u).T,
+                "g": eps * torch.log(v).T,
+                "u": u.T,
+                "v": v.T,
+            }
     else:
         mu_star = torch.matmul(gamma, torch.ones(u.size(0)).to(tens_type).to(device))
         nu_star = torch.matmul(torch.ones(u.size(0)).to(tens_type).to(device), gamma)
